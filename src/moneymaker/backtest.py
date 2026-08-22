@@ -1,11 +1,10 @@
 """Replay a season per docs/BACKTEST_PLAN.md.
 
-Per event, using ONLY information available at that pick deadline: the
-nearest-prior workbook supplies every manager's used set; the event's
-DataGolf CSV supplies the board. Engine pick vs actual pick vs realized
-earnings, with SumEV acceptance totals. Deadline workbook selection is
-content-based (no filename dates needed): the workbook with the most
-progressed pick history that still has NO picks for the event.
+Per event, using ONLY information available at that pick deadline. Selection
+is CONTENT-based (filenames never matter): the season-final workbook is the
+one with the most progressed pick history, and each event's used set is the
+picks recorded at strictly-earlier events — exactly what was known at lock.
+Majors compare like with like: engine and actual EVs both cover every slot.
 """
 import json
 import os
@@ -36,21 +35,21 @@ def replay(league_dir: str, preds_dir: str, season: int,
     books = _workbooks(league_dir)
     if not books:
         raise FileNotFoundError(f"no workbooks in {league_dir}")
-    final = books[-1]
-
-    conn = store.connect(":memory:")
-    store.ingest_league(conn, final, season)
-    if manager:
-        store.set_self(conn, manager)
-    manager = manager or store.self_manager(conn)
-    if not manager:
-        raise ValueError("pass --manager (no is_self manager in final workbook)")
 
     parsed = []
     for b in books:
         sel, _ = league.load_selections(b)
         groups = league.group_events(league.event_columns(sel))
         parsed.append((b, sel, groups, _progress(sel, groups)))
+    final_wb, final_sel, final_groups, _ = max(parsed, key=lambda t: t[3])
+
+    conn = store.connect(":memory:")
+    store.ingest_league(conn, final_wb, season)
+    if manager:
+        store.set_self(conn, manager)
+    manager = manager or store.self_manager(conn)
+    if not manager:
+        raise ValueError("pass --manager (no is_self manager in final workbook)")
 
     rows = []
     for f in sorted(os.listdir(preds_dir)):
@@ -64,27 +63,30 @@ def replay(league_dir: str, preds_dir: str, season: int,
             continue
         preds = load_preds_csv(os.path.join(preds_dir, f))
 
-        # Deadline snapshot: most progressed workbook with no picks yet here.
-        # By construction it holds only pre-deadline picks, so its full pick
-        # set for the manager IS the used set at lock time.
-        candidates = [(b, sel) for b, sel, groups, prog in parsed
-                      if prog < erow["seq"]]
-        wb, sel = candidates[-1] if candidates else parsed[0][:2]
-        try:
-            used = league.used_set(sel, manager)
-        except KeyError:
-            used = set()
+        # Used set at lock = picks at strictly earlier events, taken from the
+        # final workbook (immune to workbook selection and never leaks the
+        # event's own pick). The nearest-prior workbook is reported for
+        # transparency only.
+        used = set()
+        for g in final_groups:
+            if g["seq"] < erow["seq"]:
+                for slot, raw in league.group_picks(
+                        final_sel, g).get(manager, []):
+                    used.add(store.norm(raw))
+        prior = [t for t in parsed if t[3] < erow["seq"]]
+        deadline = max(prior, key=lambda t: t[3])[0] if prior else None
 
         purse = erow["purse"] or 1e7
         has_cut = bool(preds.attrs.get("has_cut", True))
         ineligible = store.ineligible_keys(conn, erow, preds)
         b_df = ev_board(preds, purse, used, has_cut=has_cut,
                         ineligible=set(ineligible))
-        engine = b_df.iloc[0] if len(b_df) else None
+        slots = int(erow["picks_per_manager"] or 1)
+        engine_keys = list(b_df["key"].head(slots))
+        engine_ev = float(b_df["exp"].head(slots).sum())
 
         actual = store.event_picks(conn, season, erow["event_id"]).get(manager, [])
-        actual_key = actual[0] if actual else None
-        a_row = b_df[b_df["key"] == actual_key]
+        actual_ev = float(b_df.loc[b_df["key"].isin(actual), "exp"].sum())
         realized = conn.execute(
             "SELECT SUM(p.earnings) FROM picks p JOIN managers m "
             "ON m.manager_id=p.manager_id WHERE p.season=? AND p.event_id=? "
@@ -92,11 +94,12 @@ def replay(league_dir: str, preds_dir: str, season: int,
 
         rows.append({
             "event": erow["name"], "seq": erow["seq"],
-            "deadline_workbook": os.path.basename(wb),
-            "engine_pick": engine["key"] if engine is not None else None,
-            "engine_ev": float(engine["exp"]) if engine is not None else 0.0,
-            "actual_pick": actual_key,
-            "actual_ev": float(a_row["exp"].iloc[0]) if len(a_row) else 0.0,
+            "deadline_workbook": os.path.basename(deadline) if deadline
+            else "(pre-season)",
+            "engine_pick": ", ".join(engine_keys) or None,
+            "engine_ev": engine_ev,
+            "actual_pick": ", ".join(actual) or None,
+            "actual_ev": actual_ev,
             "realized": float(realized) if realized is not None else None,
         })
 
@@ -104,6 +107,7 @@ def replay(league_dir: str, preds_dir: str, season: int,
     ok = df.dropna(subset=["engine_ev"]) if "engine_ev" in df else df
     summary = {
         "manager": manager,
+        "final_workbook": os.path.basename(final_wb),
         "sum_ev_engine": float(ok["engine_ev"].sum()) if len(ok) else 0.0,
         "sum_ev_actual": float(ok["actual_ev"].sum()) if len(ok) else 0.0,
         "sum_realized": float(ok["realized"].dropna().sum())

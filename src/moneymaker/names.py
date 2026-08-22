@@ -13,3 +13,16 @@ def norm(s) -> str:
     s = re.sub(r"\(.*?\)", "", s)
     s = re.sub(r"[^a-z ]", "", s)
     return " ".join(s.split())
+
+
+_PURSE_SUFFIX = re.compile(r"[-–]?\s*\$[\d.]+\s*M\s*$", re.I)
+
+
+def norm_event(s) -> str:
+    """Event-title key: KEEPS digits (person-norm would turn '3M Open' into
+    'm open' and match everything). Strips the '- $10M' purse suffix so a
+    purse announcement doesn't change an event's identity."""
+    s = _PURSE_SUFFIX.sub("", str(s))
+    s = s.lower().translate(_FOLD)
+    s = re.sub(r"[^a-z0-9 ]", " ", s)
+    return " ".join(s.split())

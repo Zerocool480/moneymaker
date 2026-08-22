@@ -1,24 +1,10 @@
-"""Race Monte Carlo (bucket) + final-round strokes simulator.
-Correctness rules in ALGORITHMS s4-5: shared draws, exclusive champion,
-integer strokes, tie-averaged ladders."""
+"""Final-round strokes simulator + finish distribution helpers.
+Correctness rules in ALGORITHMS s5: integer strokes, tie-averaged ladders.
+The bucket race Monte Carlo (s4: shared draws, exclusive champion) lives in
+race.py — each event is simulated ONCE and every manager holding a golfer
+reads the same payout array, which is the shared-draw invariant."""
 import numpy as np
-from .payouts import BUCKETS, BUCKET_ORDER, ladder
-
-def bucket_draw(rng, probs, purse, n):
-    p = np.clip(probs, 1e-12, None); p = p / p.sum()
-    idx = rng.choice(len(BUCKET_ORDER), size=n, p=p)
-    lo = np.array([BUCKETS[b][0] for b in BUCKET_ORDER]) * purse
-    hi = np.array([BUCKETS[b][1] for b in BUCKET_ORDER]) * purse
-    return lo[idx] + rng.random(n) * (hi[idx] - lo[idx])
-
-class SharedDraws:
-    """One draw per (golfer,event) per trial -- the correlation backbone."""
-    def __init__(self, rng, n):
-        self.rng, self.n, self._c = rng, n, {}
-    def get(self, key, probs, purse):
-        if key not in self._c:
-            self._c[key] = bucket_draw(self.rng, probs, purse, self.n)
-        return self._c[key]
+from .payouts import ladder
 
 def strokes_final_round(pos54: dict, winprob: dict, purse: float,
                         n=400_000, sd=2.85, tails="t", seed=1):
@@ -54,5 +40,6 @@ def finish_distribution(self_total, rival_totals: dict, always_ahead: int = 0):
         a = v > self_total
         passes[name] = float(a.mean()); ahead += a.astype(np.int16)
     finish = ahead + 1
-    dist = {k: float((finish == k).mean()) for k in range(1, 12)}
+    top = len(rival_totals) + always_ahead + 1   # full support, sums to 1
+    dist = {k: float((finish == k).mean()) for k in range(1, top + 1)}
     return dist, passes, finish

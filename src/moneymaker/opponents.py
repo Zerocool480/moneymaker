@@ -22,6 +22,7 @@ class Profile:
     mirror_rate: float = 0.0       # matched self's pick
     hoard_score: float = 0.0       # elite names held past best spots
     events_measured: int = 0
+    dead_hoard: tuple = ()         # unspent LIV names with no major left
 
 
 def predict_pick(profile: Profile, their_board):
@@ -68,6 +69,16 @@ def mine_profiles(conn, season: int) -> dict[str, Profile]:
         p = store.latest_preds(conn, latest_eid)
         elite = set(p.sort_values("win", ascending=False).head(8)["key"])
 
+    # Dead hoards (ALGORITHMS s8): an unspent LIV name is dead money once no
+    # major remains among unsettled events — flag it, don't count it as held
+    # firepower.
+    settled = {int(r[0]) for r in conn.execute(
+        "SELECT DISTINCT event_id FROM picks WHERE season=? AND "
+        "earnings IS NOT NULL", (season,))}
+    majors_left = any(e for e in events.itertuples()
+                      if e.field_type == "major" and e.Index not in settled)
+    liv = store.liv_keys(conn)
+
     out = {}
     for mgr, mine in picks.groupby("manager"):
         is_self = bool(mine["is_self"].iloc[0])
@@ -85,20 +96,26 @@ def mine_profiles(conn, season: int) -> dict[str, Profile]:
             if eid in preds_events:
                 preds = store.latest_preds(conn, eid)
                 erow = events.loc[eid]
+                inel = store.ineligible_keys(conn, erow, preds)
                 b = ev_board(preds, _purse(erow), used_before,
-                             has_cut=bool(erow["has_cut"]))
+                             has_cut=bool(erow["has_cut"]),
+                             ineligible=set(inel))
                 if len(b) and b.iloc[0]["key"] in keys:
                     chalk += 1
                 chalk_n += 1
             used_before |= keys
-        hoard = len(elite - used_before) / len(elite) if elite else 0.0
+        dead = tuple(sorted(liv - used_before)) if not majors_left else ()
+        live_elite = elite - set(dead)
+        hoard = (len(live_elite - used_before) / len(live_elite)
+                 if live_elite else 0.0)
         out[mgr] = Profile(
             manager=mgr,
             chalk_rate=chalk / chalk_n if chalk_n else 0.0,
             form_chase_rate=form / n if n else 0.0,
             mirror_rate=mirror / n if n else 0.0,
             hoard_score=hoard,
-            events_measured=n)
+            events_measured=n,
+            dead_hoard=dead)
     return out
 
 
@@ -120,10 +137,11 @@ def predicted_picks(conn, season: int, event_row, preds,
     slots = int(event_row["picks_per_manager"] or 1)
     out = {}
     for mgr in store.managers_list(conn):
-        if locked.get(mgr):
-            out[mgr] = locked[mgr]
+        already = list(locked.get(mgr, []))
+        if len(already) >= slots:
+            out[mgr] = already
             continue
-        used = store.used_set(conn, season, mgr) | \
+        used = store.used_set(conn, season, mgr) | set(already) | \
             (extra_used or {}).get(mgr, set())
         b = ev_board(preds, _purse(event_row), used,
                      has_cut=bool(event_row["has_cut"]),
@@ -131,11 +149,10 @@ def predicted_picks(conn, season: int, event_row, preds,
         their_board = [(r["exp"], r["key"], r["key"] in hot)
                        for _, r in b.head(12).iterrows()]
         prof = profiles.get(mgr, Profile(manager=mgr))
+        lineup = list(already)             # partial major lock: keep, extend
         first = predict_pick(prof, their_board)
-        if first is None:
-            out[mgr] = []
-            continue
-        lineup = [first]
+        if first is not None and first not in lineup:
+            lineup.append(first)
         for _, key, _ in their_board:      # extra major slots: next best EV
             if len(lineup) >= slots:
                 break

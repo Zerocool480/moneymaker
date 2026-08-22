@@ -6,12 +6,12 @@ from moneymaker import store
 
 def test_events_grouped_with_major_two_slots(db_mid):
     ev = store.events_df(db_mid, SEASON)
-    assert len(ev) == 4
+    assert len(ev) == 5
     pga = ev[ev["name"].str.contains("PGA")].iloc[0]
     assert pga["picks_per_manager"] == 2
     assert pga["field_type"] == "major"
-    assert list(ev["segment"]) == [1, 1, 2, 2]
-    assert list(ev["seq"]) == [0, 1, 2, 3]
+    assert list(ev["segment"]) == [1, 1, 2, 2, 2]
+    assert list(ev["seq"]) == [0, 1, 2, 3, 4]
 
 
 def test_purse_parsed_from_header(db_mid):
@@ -99,4 +99,46 @@ def test_reingest_is_idempotent(db_mid, wb_mid):
     store.ingest_league(db_mid, wb_mid, SEASON)
     after = store.picks_df(db_mid, SEASON)
     assert len(before) == len(after)
-    assert len(store.events_df(db_mid, SEASON)) == 4
+    assert len(store.events_df(db_mid, SEASON)) == 5
+
+
+def test_reingest_with_title_change_keeps_event_identity(db_mid, tmp_path):
+    """A purse announcement renames the header ('$20M' -> '$21M'): the event
+    must reconcile, not ghost — its predictions stay attached."""
+    import openpyxl
+    from conftest import (MANAGERS, MONEY_SETTLED, SEL_SETTLED, _merge,
+                          _totals, write_workbook)
+    trav_before = store.resolve_event(db_mid, SEASON, "travelers")
+    n_preds = db_mid.execute(
+        "SELECT COUNT(*) FROM predictions WHERE event_id=?",
+        (trav_before["event_id"],)).fetchone()[0]
+    assert n_preds > 0
+    wb2 = write_workbook(
+        tmp_path / "week2.xlsx", _merge(SEL_SETTLED), MONEY_SETTLED,
+        {"overall": _totals(MONEY_SETTLED)})
+    book = openpyxl.load_workbook(wb2)
+    for tab in ("Selections", "Money Earned"):
+        book[tab].cell(row=1, column=7, value="Travelers- $21M")
+    book.save(wb2)
+    store.ingest_league(db_mid, wb2, SEASON)
+    ev = store.events_df(db_mid, SEASON)
+    assert len(ev) == 5                                   # no ghost event
+    trav_after = store.resolve_event(db_mid, SEASON, "travelers")
+    assert trav_after["event_id"] == trav_before["event_id"]
+    assert trav_after["purse"] == 21e6
+    assert trav_after["has_cut"] == 0                     # preds survived
+
+
+def test_rapid_reingest_replaces_standings_snapshot(db_mid, wb_mid):
+    store.ingest_league(db_mid, wb_mid, SEASON)
+    store.ingest_league(db_mid, wb_mid, SEASON)   # same second is likely
+    st = store.latest_standings(db_mid, SEASON, "overall")
+    assert len(st) == 5                            # never a merged snapshot
+
+
+def test_used_set_unknown_manager_raises(db_mid):
+    try:
+        store.used_set(db_mid, SEASON, "jay doura")   # wrong case
+        assert False, "expected KeyError"
+    except KeyError as e:
+        assert "Jay Doura" in str(e)                  # tells you the fix

@@ -43,14 +43,38 @@ def test_reserved_flagged_not_hidden(pga_csv):
     assert "RESERVED" in top["flags"]
 
 
-def test_trailing_posture_blends_win(pga_csv):
-    d = load_preds_csv(pga_csv)
-    neutral = board(d, 19e6, used=set())
-    trailing = board(d, 19e6, used=set(), posture="trailing")
-    # Same pool, but trailing must weight win% harder than raw EV.
-    assert list(trailing["score"]) != list(neutral["score"])
-    top = trailing.iloc[0]
-    assert top["score"] == top["exp"] * (1 + 8.0 * top["win"])
+def test_trailing_posture_flips_to_the_win_play():
+    # The Gotterup John Deere shape: a steady-EV name vs a lower-EV,
+    # higher-win name — trailing MUST flip the board to the win play.
+    d = pd.DataFrame([
+        {"player_name": "Steady, Eddie", "key": "eddie steady",
+         "win": .02, "top_5": .25, "top_10": .40, "top_20": .60,
+         "make_cut": .95},
+        {"player_name": "Boom, Bart", "key": "bart boom",
+         "win": .11, "top_5": .18, "top_10": .22, "top_20": .28,
+         "make_cut": .50},
+    ])
+    neutral = board(d, 1e7, used=set())
+    trailing = board(d, 1e7, used=set(), posture="trailing")
+    assert neutral.iloc[0]["key"] == "eddie steady"     # raw EV favors him
+    assert trailing.iloc[0]["key"] == "bart boom"       # win%-blend flips it
+
+
+def test_leading_posture_flips_to_the_floor_play():
+    # Protecting a lead: boom-or-bust win equity loses to a steady casher
+    # even at slightly lower raw EV (ALGORITHMS s3 "leading (EV/floor)").
+    d = pd.DataFrame([
+        {"player_name": "Boom, Bart", "key": "bart boom",
+         "win": .16, "top_5": .17, "top_10": .18, "top_20": .20,
+         "make_cut": .30},
+        {"player_name": "Steady, Eddie", "key": "eddie steady",
+         "win": .01, "top_5": .20, "top_10": .35, "top_20": .55,
+         "make_cut": .90},
+    ])
+    neutral = board(d, 1e7, used=set())
+    leading = board(d, 1e7, used=set(), posture="leading")
+    assert neutral.iloc[0]["key"] == "bart boom"
+    assert leading.iloc[0]["key"] == "eddie steady"
 
 
 def test_floor_below_exp_and_no_cut_floor_higher(pga_csv):

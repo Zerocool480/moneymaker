@@ -10,8 +10,9 @@ import pandas as pd
 import pytest
 
 HDR = ["Manager", "Sony Open- $8.3M", "Farmers Insurance- $9.3M", "Segment 2",
-       "PGA Championship- $19M", "PGA Championship- $19M", "Travelers- $20M"]
-SONY, FARMERS, PGA1, PGA2, TRAV = 1, 2, 4, 5, 6
+       "PGA Championship- $19M", "PGA Championship- $19M", "Travelers- $20M",
+       "Weak Open- $6M"]
+SONY, FARMERS, PGA1, PGA2, TRAV, WEAK = 1, 2, 4, 5, 6, 7
 MANAGERS = ["Jay Doura", "Mirror Max", "Rival One", "Rival Two", "Chalk Charlie"]
 
 SEL_SETTLED = {
@@ -164,6 +165,15 @@ TRAV_PREDS = [
     ("Fox, Ryan",          .01, .05, .10, .20, 1.0),
     ("Bradley, Keegan",    .03, .12, .20, .35, 1.0),
 ]
+WEAK_PREDS = [
+    ("Scheffler, Scottie", .20, .40, .55, .72, .90),
+    ("Hovland, Viktor",    .07, .22, .33, .50, .85),
+    ("Thomas, Justin",     .06, .20, .30, .46, .84),
+    ("Bradley, Keegan",    .05, .17, .26, .40, .80),
+    ("English, Harris",    .03, .11, .19, .33, .75),
+    ("Gotterup, Chris",    .025, .10, .17, .30, .72),
+    ("Fox, Ryan",          .015, .07, .13, .24, .65),
+]
 
 
 def _preds_csv(path, rows):
@@ -182,6 +192,12 @@ def pga_csv(tmp_path_factory):
 def travelers_csv(tmp_path_factory):
     return _preds_csv(tmp_path_factory.mktemp("dg") / "travelers.csv",
                       TRAV_PREDS)
+
+
+@pytest.fixture(scope="session")
+def weak_csv(tmp_path_factory):
+    return _preds_csv(tmp_path_factory.mktemp("dg") / "weak_open.csv",
+                      WEAK_PREDS)
 
 
 @pytest.fixture(scope="session")
@@ -210,4 +226,14 @@ def db_mid(wb_mid, pga_csv, travelers_csv):
     trav = store.resolve_event(conn, SEASON, "travelers")
     store.ingest_preds_csv(conn, pga_csv, pga["event_id"])
     store.ingest_preds_csv(conn, travelers_csv, trav["event_id"])
+    return conn
+
+
+@pytest.fixture()
+def db_final(wb_final):
+    """Season over: every major settled (dead-hoard scenarios)."""
+    from moneymaker import store
+    conn = store.connect(":memory:")
+    store.ingest_league(conn, wb_final, SEASON, self_name="Jay Doura")
+    store.set_liv(conn, ["Rahm, Jon", "Bradley, Keegan"])
     return conn

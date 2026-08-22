@@ -16,7 +16,7 @@ Buckets from marginals: W=win; solo2=(t5-w)x0.30; 3-5=(t5-w)x0.70; 6-10=t10-t5;
 EV = sum p x payout(mid-range). Splits sensitivity-tested (+-.05 -> <0.2pt on
 season P(win)). Two sort modes: leading (EV/floor) vs trailing (win%-blended).
 
-## 4. Race Monte Carlo (simulate.py: SharedDraws + bucket_draw)
+## 4. Race Monte Carlo (impl: race.py simulate_event_payouts / simulate_race)
 Bucket draws per golfer per event; correctness rules that matter:
 - SHARED DRAWS: same golfer across managers = one draw per trial (mirror picks
   cancel; same-golfer threats correlate -- the 2026 "Clark riders" effect).

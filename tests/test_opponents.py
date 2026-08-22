@@ -47,3 +47,17 @@ def test_predicted_picks_respect_liv_rule(db_mid):
     pred = opp.predicted_picks(db_mid, SEASON, trav, preds)
     assert all("jon rahm" not in lineup for lineup in pred.values())
     assert all(len(lineup) == 1 for lineup in pred.values())  # not a major
+
+
+def test_dead_hoard_flagged_when_no_major_remains(db_final):
+    # The hoarded-Rahm-expired-at-the-BMW intel: season's majors settled,
+    # unspent LIV names are dead money, flagged and out of hoard_score.
+    profs = opp.mine_profiles(db_final, SEASON)
+    assert profs["Jay Doura"].dead_hoard == ("jon rahm", "keegan bradley")
+    # Rival One actually SPENT Rahm at the PGA — only Bradley is dead there.
+    assert profs["Rival One"].dead_hoard == ("keegan bradley",)
+
+
+def test_no_dead_hoard_while_a_major_remains(db_mid):
+    profs = opp.mine_profiles(db_mid, SEASON)      # PGA still unsettled
+    assert all(p.dead_hoard == () for p in profs.values())

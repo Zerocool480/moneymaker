@@ -60,19 +60,25 @@ def simulate_event_payouts(rng, curves, tracked: list[str], purse: float,
     pw = pw / pw.sum()
     winner = rng.choice(T + 1, size=n, p=pw)
 
-    # Runner-up: TRUE solo-2nd marginals + rest-of-field; conditional redraw
-    # where it collides with the winner (rest-of-field never collides — it
-    # stands for many different players).
-    p2 = np.append(solo2, max(0.0, 1.0 - solo2.sum()))
-    p2 = p2 / p2.sum()
-    runner = rng.choice(T + 1, size=n, p=p2)
-    for _ in range(10):
-        clash = (runner == winner) & (runner < T)
-        if not clash.any():
-            break
-        runner[clash] = rng.choice(T + 1, size=int(clash.sum()), p=p2)
-    else:
-        runner[(runner == winner) & (runner < T)] = T
+    # Runner-up: exclusive, with TRUE solo-2nd marginals. Conditional on any
+    # winner w != i, P(runner=i) = solo2_i / (1 - win_i); summing over the
+    # winner draw gives P(runner=i) = solo2_i EXACTLY (a naive redraw-on-
+    # clash scheme deflates favorites' solo-2nd by ~(1-win) — review-caught).
+    q = solo2 / np.clip(1.0 - wins, 1e-9, None)
+    runner = np.empty(n, dtype=np.int64)
+    for w in np.unique(winner):
+        mask = winner == w
+        qi = q.copy()
+        if w < T:
+            qi[w] = 0.0
+        s = qi.sum()
+        if s >= 1.0:                     # solo-2nd mass degenerate; keep
+            qi = qi / s                  # relative shares (documented guard)
+            rest = 0.0
+        else:
+            rest = 1.0 - s
+        runner[mask] = rng.choice(T + 1, size=int(mask.sum()),
+                                  p=np.append(qi, rest))
 
     lo = np.array([BUCKETS[b][0] for b in BUCKET_ORDER]) * purse
     hi = np.array([BUCKETS[b][1] for b in BUCKET_ORDER]) * purse
@@ -140,7 +146,7 @@ def simulate_race(standings: dict, plans: dict, event_curves: dict,
         ahead += beat.astype(np.int32)
     finish = ahead + 1
     dist = {k: float((finish == k).mean())
-            for k in range(1, min(len(managers), 12) + 1)}
+            for k in range(1, len(managers) + 1)}
     return {"dist": dist, "passes": passes, "finish": finish,
             "ev_added": ev_added, "totals": totals,
             "p_first": float((finish == 1).mean()),

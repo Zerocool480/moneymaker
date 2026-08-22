@@ -47,7 +47,15 @@ def board(preds: pd.DataFrame, purse: float, used: set, has_cut=True,
     d["amateur"] = am
     d.loc[am, ["exp", "floor"]] = 0.0  # amateurs earn $0 regardless of finish
     d["reserved"] = d["key"].isin(reserved)
-    d["score"] = d["exp"] * (1 + 8.0*d["win"]) if posture == "trailing" else d["exp"]
+    if posture == "trailing":
+        d["score"] = d["exp"] * (1 + 8.0*d["win"])
+    elif posture == "leading":
+        # "EV/floor" (ALGORITHMS s3): protect the lead — blend toward the
+        # non-win floor so steady cashers outrank boom-or-bust win equity.
+        # v1 interpretation (equal blend); adjudicate via backtest replay.
+        d["score"] = (d["exp"] + d["floor"]) / 2.0
+    else:
+        d["score"] = d["exp"]
     d["flags"] = (am.map({True: "AMATEUR $0 ", False: ""})
                   + d["reserved"].map({True: "RESERVED ", False: ""})
                   + liv.map({True: "LIV", False: ""})).str.strip()

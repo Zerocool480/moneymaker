@@ -28,17 +28,35 @@ def test_exclusive_champion_one_winner_per_trial():
 
 
 def test_runner_up_true_solo2_marginals():
-    # ALGORITHMS s4: forcing a larger share once inflated threats by 3 pts.
+    # ALGORITHMS s4: forcing a larger share once inflated threats by 3 pts,
+    # and a naive redraw-on-clash deflated favorites by ~(1-win) — both are
+    # regression-locked here with a tight (4-sigma MC) tolerance.
     c = curves([("x", .10, .30, .40, .55, .85, False),
                 ("y", .05, .20, .30, .45, .80, False)])
     rng = np.random.default_rng(4)
     pays = simulate_event_payouts(rng, c, ["x", "y"], PURSE, True, n=200_000)
     solo2_x = (.30 - .10) * 0.30
     solo2_y = (.20 - .05) * 0.30
-    assert abs((pays["x"] == .109 * PURSE).mean() - solo2_x) < .008
-    assert abs((pays["y"] == .109 * PURSE).mean() - solo2_y) < .008
+    assert abs((pays["x"] == .109 * PURSE).mean() - solo2_x) < .0022
+    assert abs((pays["y"] == .109 * PURSE).mean() - solo2_y) < .0021
     # runner-up is exclusive too
     assert not ((pays["x"] == .109 * PURSE) & (pays["y"] == .109 * PURSE)).any()
+
+
+def test_marginals_hold_with_a_crowded_tracked_field():
+    # The 86-manager case: many tracked golfers, incl. a heavy favorite whose
+    # solo-2nd share must NOT deflate (the review-caught bias was -13.5%).
+    rows = [("fav", .16, .38, .50, .65, .92, False)]
+    rows += [(f"g{i}", .04, .12, .20, .35, .80, False) for i in range(12)]
+    c = curves(rows)
+    keys = [r[0] for r in rows]
+    rng = np.random.default_rng(11)
+    pays = simulate_event_payouts(rng, c, keys, PURSE, True, n=400_000)
+    solo2_fav = (.38 - .16) * 0.30            # .0660 exactly
+    got = (pays["fav"] == .109 * PURSE).mean()
+    assert abs(got - solo2_fav) < .0016       # 4-sigma at n=400k
+    win_fav = (pays["fav"] == .18 * PURSE).mean()
+    assert abs(win_fav - .16) < .0024
 
 
 def test_amateur_pays_zero_but_blocks_the_win():

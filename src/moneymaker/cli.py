@@ -181,7 +181,11 @@ def best_available(manager: str = typer.Option(None, "--manager"),
     manager = manager or _self(conn)
     erow = store.resolve_event(conn, season, event)
     preds = store.latest_preds(conn, erow["event_id"])
-    used = store.used_set(conn, season, manager)
+    try:
+        used = store.used_set(conn, season, manager)
+    except KeyError as e:
+        typer.echo(str(e))
+        raise typer.Exit(1)
     inel = store.ineligible_keys(conn, erow, preds)
     reserved = {store.norm(r) for r in reserve}
     b = ev_board(preds, _purse_of(erow), used, has_cut=bool(erow["has_cut"]),
@@ -204,14 +208,42 @@ def best_available(manager: str = typer.Option(None, "--manager"),
                    "before spending it here.")
 
 
+def _is_strong(erow) -> bool:
+    """Fields a RESERVED ace may be spent at. Explicit field_type wins;
+    no-cut events (playoffs, signature no-cut) count as strong even when
+    still typed 'open', so reserving an ace never bars him from the very
+    events he is hoarded for."""
+    return erow["field_type"] in STRONG_FIELDS or not erow["has_cut"]
+
+
+@app.command("set-field-type")
+def set_field_type(event: str, field_type: str,
+                   season: int = SEASON_OPT, db: str = DB_OPT):
+    """Tag an event: open|signature|major|playoff70|playoff50|opposite.
+    Drives the reserved-ace guard and LIV playoff exclusion."""
+    conn = _conn(db)
+    season = _season(conn, season)
+    erow = store.resolve_event(conn, season, event)
+    try:
+        store.set_field_type(conn, erow["event_id"], field_type)
+    except ValueError as e:
+        typer.echo(str(e))
+        raise typer.Exit(1)
+    typer.echo(f"{erow['name']}: field_type={field_type}")
+
+
 @app.command("sequence")
 def sequence(manager: str = typer.Option(None, "--manager"),
              top_k: int = typer.Option(8, "--top-k"),
+             posture: str = typer.Option("neutral", "--posture",
+                                         help="leading|trailing|neutral"),
              reserve: list[str] = typer.Option([], "--reserve"),
              events: str = typer.Option(None, "--events",
                                         help="comma-separated name fragments"),
              season: int = SEASON_OPT, db: str = DB_OPT):
-    """Whole-season assignment over remaining events with preds (F4)."""
+    """Whole-season assignment over remaining OPEN slots (F4). Locked picks
+    are pinned, majors get one slot per pick, reserved aces are barred from
+    weak fields only, and posture shapes the scoring (s6)."""
     conn = _conn(db)
     season = _season(conn, season)
     manager = manager or _self(conn)
@@ -225,42 +257,78 @@ def sequence(manager: str = typer.Option(None, "--manager"),
     used = store.used_set(conn, season, manager)
     reserved = {store.norm(r) for r in reserve}
 
-    # Majors take two picks: one solver slot per pick, same board.
-    n_slots = sum(int(r["picks_per_manager"] or 1) for r in rows)
-    k = top_k
-    while k > 2 and k ** n_slots > 5_000_000:
-        k -= 1
-    if k < top_k:
-        typer.echo(f"NOTE: {n_slots} slots — reduced top-k to {k} to keep "
-                   "brute force tractable.")
-
-    boards = {}
+    boards, pinned = {}, {}
     for erow in rows:
+        locked = store.event_picks(conn, season, erow["event_id"]).get(
+            manager, [])
+        slots = int(erow["picks_per_manager"] or 1)
+        open_slots = slots - len(locked)
+        for i, key in enumerate(locked):
+            label = erow["name"] if slots == 1 else \
+                f"{erow['name']} (slot {i + 1})"
+            pinned[label] = key
+        if open_slots <= 0:
+            continue
         preds = store.latest_preds(conn, erow["event_id"])
         inel = store.ineligible_keys(conn, erow, preds)
         b = ev_board(preds, _purse_of(erow), used, has_cut=bool(erow["has_cut"]),
-                     reserved=reserved, ineligible=set(inel))
-        if erow["field_type"] not in STRONG_FIELDS:
-            b = b[~b["reserved"]]  # reserved aces excluded from weak fields
-        pool = list(zip(b["exp"].head(k), b["key"].head(k)))
-        slots = int(erow["picks_per_manager"] or 1)
-        for s in range(slots):
+                     reserved=reserved, ineligible=set(inel), posture=posture)
+        if not _is_strong(erow):
+            b = b[~b["reserved"]]  # reserved aces excluded from WEAK fields
+        pool = list(zip(b["score"].head(top_k), b["key"].head(top_k)))
+        for s in range(open_slots):
             label = erow["name"] if slots == 1 else \
-                f"{erow['name']} (slot {s + 1})"
+                f"{erow['name']} (slot {len(locked) + s + 1})"
             boards[label] = pool
 
-    best = seq_solve(boards, top_k=k)
+    if not boards:
+        typer.echo("Every remaining slot is already locked on the sheet.")
+        raise typer.Exit(0)
+    # Pinned keys are already excluded from every pool: locked picks are in
+    # the manager's used set, so the plain Hungarian solve is safe.
+    best = seq_solve(boards, top_k=top_k)
     if not best:
-        typer.echo("No feasible distinct assignment found — widen --top-k or "
-                   "drop constraints.")
+        typer.echo("No feasible distinct assignment found — widen --top-k.")
         raise typer.Exit(1)
     tot, asg = best
-    typer.echo(f"{manager} — season plan over {len(boards)} slots "
-               f"(total EV {_money(tot)}):\n")
+
+    defend = {}
+    if posture == "leading":
+        defend = _defend_marks(conn, season, rows, manager)
+    typer.echo(f"{manager} — season plan, {len(boards)} open slot(s)"
+               + (f" + {len(pinned)} locked" if pinned else "")
+               + f" ({posture} scoring, plan EV {_money(tot)}):\n")
+    for label, key in pinned.items():
+        typer.echo(f"  {label:<44} {key:<24} (locked)")
     for label, pool in boards.items():
         key = asg[label]
         ev = dict((kk, vv) for vv, kk in pool).get(key, 0.0)
-        typer.echo(f"  {label:<44} {key:<24} {_money(ev)}")
+        mark = "  DEFEND✓" if key in defend.get(label.split(" (slot")[0], set()) \
+            else ""
+        typer.echo(f"  {label:<44} {key:<24} {_money(ev)}{mark}")
+    if posture == "leading" and defend:
+        typer.echo("\nDEFEND✓ = matches a top chaser's likely pick — "
+                   "mirroring neutralizes their week (ALGORITHMS s6).")
+
+
+def _defend_marks(conn, season, rows, self_name) -> dict:
+    """event name -> set of keys the top chasers are likely to play.
+    Annotation only — the correlation-when-defending bonus stays a human
+    call in v1 (magnitude needs the backtest to calibrate)."""
+    standings = store.latest_standings(conn, season, "overall")
+    if not standings or self_name not in standings:
+        return {}
+    chasers = [m for m, _ in sorted(standings.items(), key=lambda kv: -kv[1])
+               if standings[m] < standings[self_name]][:3]
+    if not chasers:
+        return {}
+    profiles = opp.mine_profiles(conn, season)
+    out = {}
+    for erow in rows:
+        preds = store.latest_preds(conn, erow["event_id"])
+        pred = opp.predicted_picks(conn, season, erow, preds, profiles)
+        out[erow["name"]] = {k for m in chasers for k in pred.get(m, [])}
+    return out
 
 
 @app.command("simulate")
@@ -374,6 +442,10 @@ def sunday_card(positions: str = typer.Option(..., "--positions",
         pos54[k] = int(r["to_par"])
         wp[k] = float(winp.get(k, floor_wp))
     pay, tot, players = strokes_final_round(pos54, wp, purse, n=n, sd=sd)
+    amateurs = set(preds.loc[preds["amateur"].astype(bool), "key"]) \
+        if "amateur" in preds.columns else set()
+    for k in amateurs & set(pay):
+        pay[k] = np.zeros(n)           # amateurs cash $0 regardless of finish
 
     standings = store.latest_standings(conn, season, "overall") or \
         {m: 0.0 for m in store.managers_list(conn)}
@@ -385,6 +457,10 @@ def sunday_card(positions: str = typer.Option(..., "--positions",
         for k in picks.get(m, []):
             t = t + pay.get(k, zero)   # missed cut / not in field -> $0
         totals[m] = t
+    am_holders = [(m, k) for m, ks in picks.items() for k in ks
+                  if k in amateurs]
+    for m, k in am_holders:
+        typer.echo(f"NOTE: {m} holds AMATEUR {k} — $0 whatever he shoots.")
     if self_name not in totals:
         typer.echo(f"{self_name} not in standings.")
         raise typer.Exit(1)
@@ -400,7 +476,8 @@ def sunday_card(positions: str = typer.Option(..., "--positions",
         passes[m] = float(beat.mean())
         ahead += beat.astype(np.int32)
     finish = ahead + 1
-    dist = {k: float((finish == k).mean()) for k in range(1, 11)}
+    dist = {k: float((finish == k).mean())
+            for k in range(1, len(standings) + 1)}
     typer.echo("Board finish: " + "  ".join(
         f"{k}:{_pct(v)}" for k, v in dist.items() if v > 0.005))
 
@@ -429,11 +506,13 @@ def opponents_cmd(season: int = SEASON_OPT, db: str = DB_OPT):
         typer.echo("No pick history — ingest the league sheet first.")
         raise typer.Exit(1)
     typer.echo(f"{'manager':<28} {'chalk':>6} {'form':>6} {'mirror':>7} "
-               f"{'hoard':>6} {'events':>7}")
+               f"{'hoard':>6} {'events':>7}  dead hoard")
     for p in sorted(profs.values(), key=lambda p: -p.mirror_rate):
+        dead = ", ".join(p.dead_hoard) if p.dead_hoard else ""
         typer.echo(f"{p.manager:<28} {p.chalk_rate:>6.0%} "
                    f"{p.form_chase_rate:>6.0%} {p.mirror_rate:>7.0%} "
-                   f"{p.hoard_score:>6.0%} {p.events_measured:>7}")
+                   f"{p.hoard_score:>6.0%} {p.events_measured:>7}"
+                   + (f"  DEAD: {dead}" if dead else ""))
 
 
 @app.command("journal")

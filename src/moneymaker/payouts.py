@@ -12,6 +12,12 @@ def ladder(purse: float, n: int = 50) -> np.ndarray:
         [FRAC, np.full(n - len(FRAC), FRAC[-1] * 0.9)])
     return f * purse
 
+# Season-proven 2026 bucket ranges (ALGORITHMS s3). NOTE: buckets "35"/"610"/
+# "41C" sit above the corresponding solo-position FRAC payouts — plausibly
+# tie-group averaging (a T5 spanning positions 5-6 pays above solo-6th) and
+# major-ladder steepness baked into the empirical ranges. Flagged in review;
+# adjudicate against the 2026 archive per docs/BACKTEST_PLAN.md before
+# changing — CLAUDE.md forbids "improving" proven math without a backtest.
 BUCKETS = {"W": (.18,.18), "2": (.109,.109), "35": (.055,.085),
            "610": (.030,.048), "1120": (.016,.028), "2140": (.0075,.014),
            "41C": (.0035,.0065), "MC": (0,0)}

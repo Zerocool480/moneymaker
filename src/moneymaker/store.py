@@ -14,7 +14,10 @@ import pandas as pd
 
 from . import league
 from .datagolf import COLS, load_preds_csv
-from .names import norm
+from .names import norm, norm_event
+
+FIELD_TYPES = ("open", "signature", "major", "playoff70", "playoff50",
+               "opposite")
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS golfers(
@@ -38,8 +41,7 @@ CREATE TABLE IF NOT EXISTS events(
   picks_per_manager INTEGER DEFAULT 1,
   has_cut INTEGER DEFAULT 1,
   field_type TEXT DEFAULT 'open',
-  datagolf_event_id TEXT,
-  UNIQUE(season, name, seq));
+  datagolf_event_id TEXT);
 CREATE TABLE IF NOT EXISTS picks(
   season INTEGER NOT NULL,
   event_id INTEGER NOT NULL,
@@ -152,24 +154,44 @@ def amateur_keys(conn) -> set:
 
 # ---------------------------------------------------------------- ingestion
 
+def _occurrence_keys(titles):
+    """Stable identity per event: (norm_event(title), occurrence index) —
+    survives purse-suffix changes, renames that keep the core title, and
+    column/seq shifts between weekly uploads."""
+    seen, out = {}, []
+    for t in titles:
+        k = norm_event(t)
+        out.append((k, seen.get(k, 0)))
+        seen[k] = seen.get(k, 0) + 1
+    return out
+
+
 def ingest_league(conn, xlsx_path, season: int, self_name: str | None = None) -> dict:
     """Load a league workbook snapshot: events, managers, picks (with Money
     Earned settlement), standings snapshot. The sheet is the source of truth —
-    the season's picks are replaced wholesale."""
+    the season's picks are replaced wholesale, and events are reconciled by
+    stable title identity (not seq/exact name, which shift between uploads)."""
     sel, _ = league.load_selections(xlsx_path)
     groups = league.group_events(league.event_columns(sel))
 
+    existing = conn.execute(
+        "SELECT * FROM events WHERE season=? ORDER BY seq", (season,)).fetchall()
+    existing_map = dict(zip(_occurrence_keys([e["name"] for e in existing]),
+                            existing))
     event_ids = {}
-    for g in groups:
-        row = conn.execute(
-            "SELECT event_id FROM events WHERE season=? AND name=? AND seq=?",
-            (season, g["title"], g["seq"])).fetchone()
-        if row:
-            eid = row[0]
+    for g, okey in zip(groups, _occurrence_keys([g["title"] for g in groups])):
+        match = existing_map.pop(okey, None)
+        if match:
+            eid = match["event_id"]
+            ftype = match["field_type"]
+            if len(g["cols"]) == 2 and ftype == "open":
+                ftype = "major"   # upgrade only; never clobber explicit types
             conn.execute(
-                "UPDATE events SET segment=?, purse=COALESCE(?, purse), "
-                "picks_per_manager=? WHERE event_id=?",
-                (g["segment"], g["purse"], len(g["cols"]), eid))
+                "UPDATE events SET name=?, segment=?, seq=?, "
+                "purse=COALESCE(?, purse), picks_per_manager=?, field_type=? "
+                "WHERE event_id=?",
+                (g["title"], g["segment"], g["seq"], g["purse"],
+                 len(g["cols"]), ftype, eid))
         else:
             eid = conn.execute(
                 "INSERT INTO events(season, name, segment, seq, purse, "
@@ -178,6 +200,7 @@ def ingest_league(conn, xlsx_path, season: int, self_name: str | None = None) ->
                  len(g["cols"]),
                  "major" if len(g["cols"]) == 2 else "open")).lastrowid
         event_ids[g["seq"]] = eid
+    orphans = [e["name"] for e in existing_map.values()]
 
     conn.execute("DELETE FROM picks WHERE season=?", (season,))
     n_picks = 0
@@ -217,6 +240,9 @@ def ingest_league(conn, xlsx_path, season: int, self_name: str | None = None) ->
                     n_settled += cur.rowcount
 
     taken = _now()
+    # A re-ingest within the same second must fully replace, never merge.
+    conn.execute("DELETE FROM standings_snapshots WHERE season=? AND taken_at=?",
+                 (season, taken))
     n_rows = 0
     for board in ("overall", "segment1", "segment2", "segment3", "segment4"):
         try:
@@ -235,7 +261,7 @@ def ingest_league(conn, xlsx_path, season: int, self_name: str | None = None) ->
         set_self(conn, self_name)
     conn.commit()
     return {"events": len(groups), "picks": n_picks, "settled": n_settled,
-            "standings_rows": n_rows}
+            "standings_rows": n_rows, "orphan_events": orphans}
 
 
 def ingest_preds_frame(conn, d: pd.DataFrame, event_id: int,
@@ -277,11 +303,12 @@ def ingest_preds_csv(conn, csv_path, event_id: int) -> dict:
 # ------------------------------------------------------------------ queries
 
 def resolve_event(conn, season: int, fragment: str):
-    """Find one event by (case/punct-insensitive) substring of its name."""
-    frag = norm(fragment)
+    """Find one event by (case/punct-insensitive) substring of its name.
+    Uses the digit-preserving event normalizer so '3M' stays '3m'."""
+    frag = norm_event(fragment)
     rows = conn.execute(
         "SELECT * FROM events WHERE season=? ORDER BY seq", (season,)).fetchall()
-    hits = [r for r in rows if frag in norm(r["name"])]
+    hits = [r for r in rows if frag and frag in norm_event(r["name"])]
     if len(hits) == 1:
         return hits[0]
     if not hits:
@@ -291,12 +318,24 @@ def resolve_event(conn, season: int, fragment: str):
                    + ", ".join(r["name"] for r in hits))
 
 
+def set_field_type(conn, event_id: int, field_type: str):
+    if field_type not in FIELD_TYPES:
+        raise ValueError(f"field_type must be one of {FIELD_TYPES}")
+    conn.execute("UPDATE events SET field_type=? WHERE event_id=?",
+                 (field_type, event_id))
+    conn.commit()
+
+
 def events_df(conn, season: int) -> pd.DataFrame:
     return pd.read_sql_query(
         "SELECT * FROM events WHERE season=? ORDER BY seq", conn, params=(season,))
 
 
 def used_set(conn, season: int, manager: str) -> set:
+    if not conn.execute("SELECT 1 FROM managers WHERE name=?",
+                        (manager,)).fetchone():
+        known = ", ".join(managers_list(conn)) or "(none ingested)"
+        raise KeyError(f"manager not found: {manager!r}; have: {known}")
     rows = conn.execute(
         "SELECT g.key FROM picks p JOIN golfers g ON g.golfer_id=p.golfer_id "
         "JOIN managers m ON m.manager_id=p.manager_id "
