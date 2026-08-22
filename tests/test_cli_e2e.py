@@ -82,6 +82,36 @@ def test_sunday_card(tmp_path, wb_sunday, pga_csv, positions_csv):
     assert "AMATEUR" in out and "Chalk Charlie" in out
 
 
+def test_sunday_card_live_positions(tmp_path, wb_sunday, pga_csv, monkeypatch):
+    import pandas as pd
+
+    from moneymaker import cli
+
+    class FakeAPI:
+        def live_stats(self, tour="pga"):
+            return pd.DataFrame({
+                "event_name": ["PGA Championship"] * 4,
+                "last_updated": ["2027-05-22"] * 4,
+                "stat_round": [3] * 4,
+                "position": ["1", "2", "T3", "CUT"],
+                "player_name": ["Scheffler, Scottie", "Hovland, Viktor",
+                                "Thomas, Justin", "Fox, Ryan"],
+                "total": [-12, -11, -8, 2],
+            })
+
+    monkeypatch.setattr(cli, "DataGolfAPI", FakeAPI)
+    db = str(tmp_path / "mm.db")
+    base = ["--db", db, "--season", SEASON]
+    run("ingest-league", str(wb_sunday), "--self", "Jay Doura", *base)
+    run("ingest-preds", str(pga_csv), "--event", "pga", *base)
+    out = run("sunday-card", "--live", "--event", "pga", "--n", "6000", *base)
+    assert "live positions: 3 players" in out      # CUT row dropped
+    assert "Pass thresholds" in out
+
+    res = runner.invoke(app, ["sunday-card", "--event", "pga", *base])
+    assert res.exit_code == 1                      # neither source given
+
+
 def test_sequence_reserved_ace_weak_fields_only(tmp_path, wb_mid, pga_csv,
                                                 travelers_csv, weak_csv):
     """Reserved aces are barred from WEAK fields only. The no-cut $20M

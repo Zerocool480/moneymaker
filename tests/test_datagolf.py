@@ -63,6 +63,21 @@ class _FakeResp(io.BytesIO):
         return False
 
 
+def test_api_keeps_one_model_from_stacked_feed():
+    # Live-feed fact (BMW 2026 pull): one row per golfer PER MODEL.
+    body = (b"player_name,model,win,top_5,top_10,top_20,make_cut\n"
+            b'"Clark, Wyndham",baseline,.05,.2,.3,.5,1\n'
+            b'"Clark, Wyndham",baseline_history_fit,.04,.18,.28,.48,1\n'
+            b'"Spaun, J.J.",baseline,.03,.1,.2,.4,1\n'
+            b'"Spaun, J.J.",baseline_history_fit,.02,.09,.19,.39,1\n')
+
+    api = DataGolfAPI(key="k123", opener=lambda u, timeout=None: _FakeResp(body))
+    d = api.pre_tournament_preds()
+    assert len(d) == 2                       # one row per golfer
+    assert set(d["model"]) == {"baseline_history_fit"}
+    assert d.loc[d["key"] == "wyndham clark", "win"].iloc[0] == .04
+
+
 def test_api_maps_percent_feed_to_probabilities():
     body = (b"player_name,win,top_5,top_10,top_20,make_cut\n"
             b'"Scheffler, Scottie",16,35,48,65,92\n'

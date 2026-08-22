@@ -423,20 +423,47 @@ def threats(event: str = typer.Option(..., "--event"),
 
 
 @app.command("sunday-card")
-def sunday_card(positions: str = typer.Option(..., "--positions",
+def sunday_card(positions: str = typer.Option(None, "--positions",
                                               help="CSV: player_name,to_par"),
+                live: bool = typer.Option(False, "--live",
+                                          help="pull 54-hole positions from "
+                                          "the DataGolf live feed"),
+                tour: str = typer.Option("pga", "--tour"),
                 event: str = typer.Option(..., "--event"),
                 n: int = typer.Option(200_000, "--n"),
                 sd: float = typer.Option(2.85, "--sd"),
                 season: int = SEASON_OPT, db: str = DB_OPT):
     """Final-round strokes card (F6/F7): finish distribution, per-rival
     P(pass), dollar pass-thresholds. Standings are assumed PRE-event."""
+    if bool(positions) == live:
+        typer.echo("Pass exactly one of --positions CSV or --live.")
+        raise typer.Exit(1)
     conn = _conn(db)
     season = _season(conn, season)
     self_name = _self(conn)
     erow = store.resolve_event(conn, season, event)
     purse = _purse_of(erow)
-    pos_df = pd.read_csv(positions)
+    if live:
+        try:
+            ls = DataGolfAPI().live_stats(tour)
+        except RuntimeError as e:
+            typer.echo(str(e))
+            raise typer.Exit(1)
+        rnd = pd.to_numeric(ls.get("stat_round"), errors="coerce").max()
+        if pd.notna(rnd) and int(rnd) != 3:
+            typer.echo(f"WARNING: live feed is at round {int(rnd)}, not 54 "
+                       "holes — the final-round model assumes R4 hasn't "
+                       "started.")
+        ls["to_par"] = pd.to_numeric(ls["total"], errors="coerce")
+        alive = ~ls["position"].astype(str).str.upper().isin(
+            ("CUT", "WD", "DQ", "DNS"))
+        pos_df = ls.loc[alive & ls["to_par"].notna(),
+                        ["player_name", "to_par"]]
+        typer.echo(f"live positions: {len(pos_df)} players "
+                   f"({ls['event_name'].iloc[0]}, updated "
+                   f"{ls['last_updated'].iloc[0]})")
+    else:
+        pos_df = pd.read_csv(positions)
     preds = store.latest_preds(conn, erow["event_id"])
     winp = dict(zip(preds["key"], preds["win"]))
     floor_wp = max(min(winp.values(), default=1e-3) * 0.5, 1e-4)

@@ -95,10 +95,19 @@ class DataGolfAPI:
                 "contract may have changed, please report this.")
         return d
 
-    def pre_tournament_preds(self, tour: str = "pga") -> pd.DataFrame:
+    def pre_tournament_preds(self, tour: str = "pga",
+                             model: str = "baseline_history_fit"
+                             ) -> pd.DataFrame:
         d = self._get_csv("preds/pre-tournament", tour=tour,
                           required=("player_name", *COLS),
                           odds_format="percent", dead_heat="no")
+        # Live-feed fact (verified 2026-08, BMW pull): the CSV stacks one row
+        # per golfer PER MODEL (baseline + baseline_history_fit). Keep one
+        # model or every golfer ingests twice.
+        if "model" in d.columns and d["model"].nunique() > 1:
+            want = model if (d["model"] == model).any() else \
+                d["model"].iloc[0]
+            d = d[d["model"] == want].copy()
         # Percent -> probability if the feed returned 0-100 numbers.
         for c in COLS:
             d[c] = pd.to_numeric(d[c], errors="coerce")
