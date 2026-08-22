@@ -97,8 +97,8 @@ def _plans(conn, season, event_rows, profiles=None):
             if locked.get(mgr):
                 plan[mgr] = locked[mgr]
             elif pred.get(mgr):
-                plan[mgr] = [pred[mgr]]
-                projected.setdefault(mgr, set()).add(pred[mgr])
+                plan[mgr] = pred[mgr]
+                projected.setdefault(mgr, set()).update(pred[mgr])
         name = erow["name"]
         plans[name] = plan
         curves[name] = preds
@@ -300,7 +300,7 @@ def simulate_cmd(board: str = typer.Option("overall", "--board",
     typer.echo("Finish distribution: " + "  ".join(
         f"{k}:{_pct(v)}" for k, v in res["dist"].items() if v > 0.001))
     threats = sorted(res["passes"].items(), key=lambda kv: -kv[1])[:15]
-    typer.echo("\nTop threats (P(pass)):")
+    typer.echo("\nTop threats (P(finishes ahead of you)):")
     gap = {m: standings.get(m, 0) - standings.get(self_name, 0)
            for m, _ in threats}
     for m, p in threats:
@@ -414,8 +414,9 @@ def sunday_card(positions: str = typer.Option(..., "--positions",
         covers = np.where(lad > gap)[0]
         pos_txt = (f"needs solo-{covers.max() + 1} ≈ {_money(lad[covers.max()])}"
                    if len(covers) else "no solo finish covers the gap")
+        p_pass = float((self_total > totals[m]).mean())
         typer.echo(f"  {m:<28} gap {_money(gap)}  ({pos_txt}; "
-                   f"P(pass) {_pct(passes.get(m, 0.0))})")
+                   f"P(you pass) {_pct(p_pass)})")
 
 
 @app.command("opponents")

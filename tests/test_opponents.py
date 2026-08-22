@@ -32,14 +32,18 @@ def test_predicted_picks_locked_verbatim_else_projected(db_mid):
     pga = store.resolve_event(db_mid, SEASON, "pga championship")
     preds = store.latest_preds(db_mid, pga["event_id"])
     pred = opp.predicted_picks(db_mid, SEASON, pga, preds)
-    assert pred["Rival One"] == "rory mcilroy"        # locked on the sheet
-    assert pred["Jay Doura"] == "scottie scheffler"   # projected chalk
+    assert pred["Rival One"] == ["rory mcilroy", "jon rahm"]  # locked verbatim
+    # projections fill BOTH major slots: chalk + next-best EV
+    assert pred["Jay Doura"] == ["scottie scheffler", "rory mcilroy"]
     # projections respect the one-and-done used set
-    assert pred["Rival Two"] not in store.used_set(db_mid, SEASON, "Rival Two")
+    used = store.used_set(db_mid, SEASON, "Rival Two")
+    assert not (set(pred["Rival Two"]) & used)
+    assert len(set(pred["Rival Two"])) == 2               # slots are distinct
 
 
 def test_predicted_picks_respect_liv_rule(db_mid):
     trav = store.resolve_event(db_mid, SEASON, "travelers")
     preds = store.latest_preds(db_mid, trav["event_id"])
     pred = opp.predicted_picks(db_mid, SEASON, trav, preds)
-    assert all(k != "jon rahm" for k in pred.values())
+    assert all("jon rahm" not in lineup for lineup in pred.values())
+    assert all(len(lineup) == 1 for lineup in pred.values())  # not a major

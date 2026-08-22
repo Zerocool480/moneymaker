@@ -105,9 +105,10 @@ def mine_profiles(conn, season: int) -> dict[str, Profile]:
 def predicted_picks(conn, season: int, event_row, preds,
                     profiles: dict[str, Profile] | None = None,
                     extra_used: dict | None = None) -> dict:
-    """manager -> predicted golfer key for one event. Locked picks (already on
-    the sheet for this event) are used verbatim; everyone else gets the
-    profile-weighted argmax over their remaining board.
+    """manager -> [predicted golfer keys] for one event (majors: as many
+    slots as picks_per_manager). Locked picks (already on the sheet for this
+    event) are used verbatim; everyone else gets the profile-weighted argmax
+    over their remaining board, then next-best for extra major slots.
 
     extra_used: manager -> keys already projected at OTHER remaining events,
     so a multi-week projection never spends a golfer twice (one-and-done)."""
@@ -116,10 +117,11 @@ def predicted_picks(conn, season: int, event_row, preds,
     picks = store.picks_df(conn, season)
     hot = hot_keys(picks, int(event_row["seq"]))
     ineligible = store.ineligible_keys(conn, event_row, preds)
+    slots = int(event_row["picks_per_manager"] or 1)
     out = {}
     for mgr in store.managers_list(conn):
         if locked.get(mgr):
-            out[mgr] = locked[mgr][0]
+            out[mgr] = locked[mgr]
             continue
         used = store.used_set(conn, season, mgr) | \
             (extra_used or {}).get(mgr, set())
@@ -129,5 +131,15 @@ def predicted_picks(conn, season: int, event_row, preds,
         their_board = [(r["exp"], r["key"], r["key"] in hot)
                        for _, r in b.head(12).iterrows()]
         prof = profiles.get(mgr, Profile(manager=mgr))
-        out[mgr] = predict_pick(prof, their_board)
+        first = predict_pick(prof, their_board)
+        if first is None:
+            out[mgr] = []
+            continue
+        lineup = [first]
+        for _, key, _ in their_board:      # extra major slots: next best EV
+            if len(lineup) >= slots:
+                break
+            if key not in lineup:
+                lineup.append(key)
+        out[mgr] = lineup
     return out
