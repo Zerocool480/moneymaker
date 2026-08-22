@@ -4,7 +4,15 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Money Maker — {% block title %}{{ page|title }}{% endblock %}</title>
+<link rel="preload" href="/static/inter-var-latin.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="stylesheet" href="/static/style.css">
+<script>
+(function () {
+  var t = localStorage.getItem("mm-theme");
+  if (!t) t = matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark";
+  if (t === "light") document.documentElement.setAttribute("data-theme", "light");
+})();
+</script>
 <script src="/static/htmx.min.js" defer></script>
 </head>
 <body>
@@ -23,6 +31,12 @@
     {% endfor %}
   </nav>
   {% if self_name %}<div class="whoami">{{ self_name }}</div>{% endif %}
+  <button class="theme-toggle" title="Toggle light/dark" onclick="
+    var h = document.documentElement;
+    var light = h.getAttribute('data-theme') === 'light';
+    if (light) { h.removeAttribute('data-theme'); localStorage.setItem('mm-theme','dark'); }
+    else { h.setAttribute('data-theme','light'); localStorage.setItem('mm-theme','light'); }
+  ">◐</button>
 </header>
 <main class="content">
 {% if not onboarded %}

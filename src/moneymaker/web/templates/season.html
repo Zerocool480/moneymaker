@@ -6,7 +6,11 @@
     <thead><tr><th>#</th><th>Event</th><th>Seg</th><th class="num">Purse</th>
       <th>Field</th><th>Status</th><th>Your pick</th><th class="num">Earned</th></tr></thead>
     <tbody>
+    {% set ns = namespace(seg=None) %}
     {% for e in schedule %}
+      {% if e.segment != ns.seg %}{% set ns.seg = e.segment %}
+      <tr class="seg-head"><td colspan="8">Segment {{ e.segment }}</td></tr>
+      {% endif %}
       <tr class="status-{{ e.status }}">
         <td>{{ e.seq + 1 }}</td>
         <td>{{ e.name }}{% if e.picks_per_manager == 2 %} <span class="chip chip-major">major ×2</span>{% endif %}</td>

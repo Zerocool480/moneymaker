@@ -36,7 +36,7 @@
       <thead><tr><th>#</th><th>Manager</th><th class="num">Total</th></tr></thead>
       <tbody>
         {% for r in standings %}
-        <tr class="{{ 'self-row' if r.is_self }} {{ 'money-row' if r.paid }}">
+        <tr class="{{ 'self-row' if r.is_self }} {{ 'money-row' if r.paid }} {{ 'money-edge' if r.rank == paid }}">
           <td>{{ r.rank }}</td>
           <td>{{ r.manager }}{% if r.is_self %} <span class="chip chip-self">you</span>{% endif %}
               {% if r.paid %}<span class="chip chip-money">$</span>{% endif %}</td>
