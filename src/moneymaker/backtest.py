@@ -30,8 +30,31 @@ def _progress(sel, groups) -> int:
     return last
 
 
+def _resolve_preds_event(conn, season, frag):
+    """Map a preds FILENAME to a sheet event. Filenames carry noise
+    ('..._preds_ch_model_2'), so after the direct substring try, fall back to
+    reverse containment — the event name inside the filename — preferring the
+    longest name ('genesis scottish' must beat 'genesis')."""
+    from .names import norm_event
+    try:
+        return store.resolve_event(conn, season, frag)
+    except KeyError:
+        pass
+    nfrag = norm_event(frag)
+    rows = conn.execute("SELECT * FROM events WHERE season=? ORDER BY seq",
+                        (season,)).fetchall()
+    hits = [r for r in rows
+            if norm_event(r["name"]) and norm_event(r["name"]) in nfrag]
+    if not hits:
+        return None
+    return max(hits, key=lambda r: len(norm_event(r["name"])))
+
+
 def replay(league_dir: str, preds_dir: str, season: int,
-           manager: str | None = None, out_json: str | None = None):
+           manager: str | None = None, out_json: str | None = None,
+           purse_overrides: dict | None = None):
+    """purse_overrides: event-name fragment -> purse in DOLLARS, for events
+    whose sheet title carries no purse suffix (the majors)."""
     books = _workbooks(league_dir)
     if not books:
         raise FileNotFoundError(f"no workbooks in {league_dir}")
@@ -45,6 +68,10 @@ def replay(league_dir: str, preds_dir: str, season: int,
 
     conn = store.connect(":memory:")
     store.ingest_league(conn, final_wb, season)
+    for frag, purse in (purse_overrides or {}).items():
+        erow = store.resolve_event(conn, season, frag)
+        conn.execute("UPDATE events SET purse=? WHERE event_id=?",
+                     (purse, erow["event_id"]))
     if manager:
         store.set_self(conn, manager)
     manager = manager or store.self_manager(conn)
@@ -56,9 +83,8 @@ def replay(league_dir: str, preds_dir: str, season: int,
         if not f.endswith(".csv"):
             continue
         frag = os.path.splitext(f)[0].replace("_", " ").replace("-", " ")
-        try:
-            erow = store.resolve_event(conn, season, frag)
-        except KeyError:
+        erow = _resolve_preds_event(conn, season, frag)
+        if erow is None:
             rows.append({"event": frag, "note": "no matching sheet event"})
             continue
         preds = load_preds_csv(os.path.join(preds_dir, f))

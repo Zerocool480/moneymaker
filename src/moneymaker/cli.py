@@ -563,17 +563,36 @@ def journal(add: str = typer.Option(None, "--add"),
     typer.echo(df.to_string(index=False) if len(df) else "journal empty.")
 
 
+@app.command("set-purse")
+def set_purse(event: str, millions: float,
+              season: int = SEASON_OPT, db: str = DB_OPT):
+    """Set an event's purse in $M (majors carry no purse in their header)."""
+    conn = _conn(db)
+    season = _season(conn, season)
+    erow = store.resolve_event(conn, season, event)
+    conn.execute("UPDATE events SET purse=? WHERE event_id=?",
+                 (millions * 1e6, erow["event_id"]))
+    conn.commit()
+    typer.echo(f"{erow['name']}: purse {_money(millions * 1e6)}")
+
+
 @app.command("backtest")
 def backtest_cmd(league_dir: str = typer.Option(..., "--league-dir"),
                  preds_dir: str = typer.Option(..., "--preds-dir"),
                  manager: str = typer.Option(None, "--manager"),
+                 purse: list[str] = typer.Option(
+                     [], "--purse", help="fragment=millions, e.g. 'us open=21.5'"),
                  out: str = typer.Option(None, "--out",
                                          help="write golden JSON here"),
                  season: int = SEASON_OPT):
     """Replay a season per docs/BACKTEST_PLAN.md (engine vs actual, SumEV)."""
     season = int(season or _dt.date.today().year)
+    overrides = {}
+    for p in purse:
+        frag, _, mm = p.partition("=")
+        overrides[frag.strip()] = float(mm) * 1e6
     df, summary = backtest_mod.replay(league_dir, preds_dir, season,
-                                      manager, out)
+                                      manager, out, overrides)
     with pd.option_context("display.max_columns", None, "display.width", 200):
         typer.echo(df.to_string(index=False))
     typer.echo(f"\nSumEV engine {_money(summary['sum_ev_engine'])} vs actual "

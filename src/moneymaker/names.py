@@ -15,7 +15,7 @@ def norm(s) -> str:
     return " ".join(s.split())
 
 
-_PURSE_SUFFIX = re.compile(r"[-–]?\s*\$[\d.]+\s*M\s*$", re.I)
+_PURSE_SUFFIX = re.compile(r"[-–]\s*\$?\s*[\d.]+\s*M\s*$", re.I)
 
 
 def norm_event(s) -> str:

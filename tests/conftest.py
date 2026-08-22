@@ -9,7 +9,8 @@ import openpyxl
 import pandas as pd
 import pytest
 
-HDR = ["Manager", "Sony Open- $8.3M", "Farmers Insurance- $9.3M", "Segment 2",
+# "Segment 1" marker CLOSES segment 1 (matches the real 2026 sheet layout).
+HDR = ["Manager", "Sony Open- $8.3M", "Farmers Insurance- $9.3M", "Segment 1",
        "PGA Championship- $19M", "PGA Championship- $19M", "Travelers- $20M",
        "Weak Open- $6M"]
 SONY, FARMERS, PGA1, PGA2, TRAV, WEAK = 1, 2, 4, 5, 6, 7

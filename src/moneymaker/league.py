@@ -4,7 +4,10 @@ import pandas as pd
 from .names import norm
 
 SEGMENT_RX = re.compile(r"^\s*Segment\s*\d", re.I)
-PURSE_RX = re.compile(r"\$([\d.]+)\s*M", re.I)
+# Purse lives in a TRAILING "- $9.1M" / "- 9.2M" suffix ($ optional — the
+# 2026 sheet has both). Anchored to the end so "3M Open- $8.8M" parses 8.8,
+# never the "3M" of the event name.
+PURSE_RX = re.compile(r"[-–]\s*\$?\s*([\d.]+)\s*M\s*$", re.I)
 
 def load_selections(path):
     sel = pd.read_excel(path, sheet_name="Selections", header=None)
@@ -61,8 +64,9 @@ SEGMENT_NUM_RX = re.compile(r"Segment\s*(\d+)", re.I)
 
 
 def event_columns(sel):
-    """Header row -> [(col, title, purse_or_None, segment)]. Segment marker
-    columns ("Segment N") set the segment for the events that FOLLOW them;
+    """Header row -> [(col, title, purse_or_None, segment)]. A "Segment N"
+    marker column CLOSES segment N (verified on the 2026 sheet: the marker
+    sits after its segment's last event), so events after it are N+1;
     events before any marker are segment 1."""
     hdr = sel.iloc[0].tolist()
     seg = 1
@@ -74,7 +78,7 @@ def event_columns(sel):
         m = SEGMENT_NUM_RX.search(str(h))
         if SEGMENT_RX.match(str(h)):
             if m:
-                seg = int(m.group(1))
+                seg = int(m.group(1)) + 1
             continue
         pm = PURSE_RX.search(str(h))
         out.append((c, str(h).strip(), float(pm.group(1)) * 1e6 if pm else None, seg))
