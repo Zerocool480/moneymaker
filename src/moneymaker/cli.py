@@ -703,5 +703,19 @@ def backtest_cmd(league_dir: str = typer.Option(..., "--league-dir"),
                f"realized {_money(summary['sum_realized'])}")
 
 
+@app.command("web")
+def web_cmd(host: str = typer.Option("127.0.0.1", "--host"),
+            port: int = typer.Option(8501, "--port"),
+            season: int = SEASON_OPT, db: str = DB_OPT):
+    """Launch the local web UI (dashboard, pick screen, race odds, season
+    map, Sunday card, history)."""
+    import uvicorn
+
+    from .web.app import create_app
+    typer.echo(f"Money Maker Engine → http://{host}:{port}")
+    uvicorn.run(create_app(db=db, season=season), host=host, port=port,
+                log_level="warning")
+
+
 if __name__ == "__main__":
     app()

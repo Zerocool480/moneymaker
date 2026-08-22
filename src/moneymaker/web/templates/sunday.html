@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="card">
+  <div class="card-head"><h2>Sunday card</h2></div>
+  <p class="meta">Final-round strokes simulator: live 54-hole positions + your league's locked picks
+     → finish odds and dollar pass-thresholds.</p>
+  <form hx-post="/sunday/run" hx-target="#sunday-result" hx-indicator="#sun-spin"
+        hx-encoding="multipart/form-data" class="inline-form">
+    <label class="field">Event
+      <select name="event">
+        {% for e in pred_events %}<option value="{{ e.name }}">{{ e.name }}</option>{% endfor %}
+      </select>
+    </label>
+    <label class="field check"><input type="radio" name="source" value="live" checked> live DataGolf positions</label>
+    <label class="field check"><input type="radio" name="source" value="upload"> upload CSV</label>
+    <input type="file" name="positions" accept=".csv">
+    <button class="btn primary" type="submit">Deal the card</button>
+    <span id="sun-spin" class="spinner htmx-indicator">simulating…</span>
+  </form>
+</section>
+<div id="sunday-result"></div>
+{% endblock %}

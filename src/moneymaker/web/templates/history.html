@@ -1,0 +1,56 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="cols">
+  <div class="card grow">
+    <div class="card-head"><h2>Your season — {{ my_total|money }} banked</h2></div>
+    {% if my_picks %}
+    <table class="data">
+      <thead><tr><th>Event</th><th>Pick</th><th class="num">Earned</th></tr></thead>
+      <tbody>
+      {% for p in my_picks %}
+        <tr><td>{{ p.event }}</td><td>{{ p.display_name }}</td>
+            <td class="num">{{ p.earnings|money if p.earnings is not none else "pending" }}</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    {% else %}<p class="empty">No picks recorded yet.</p>{% endif %}
+  </div>
+
+  <div class="card grow">
+    <div class="card-head"><h2>Rival profiles</h2></div>
+    {% if profiles %}
+    <table class="data">
+      <thead><tr><th>Manager</th><th class="num">Chalk</th><th class="num">Form</th>
+        <th class="num">Mirror</th><th class="num">Hoard</th><th>Dead hoard</th></tr></thead>
+      <tbody>
+      {% for p in profiles %}
+        <tr>
+          <td>{{ p.manager }}</td>
+          <td class="num">{{ p.chalk_rate|pct0 }}</td>
+          <td class="num">{{ p.form_chase_rate|pct0 }}</td>
+          <td class="num">{{ p.mirror_rate|pct0 }}</td>
+          <td class="num">{{ p.hoard_score|pct0 }}</td>
+          <td>{% if p.dead_hoard %}<span class="chip chip-flag">{{ p.dead_hoard|join(", ") }}</span>{% endif %}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    {% else %}<p class="empty">Profiles appear once pick history exists.</p>{% endif %}
+  </div>
+</section>
+
+<section class="card">
+  <div class="card-head"><h2>Journal</h2></div>
+  {% if journal %}
+  <table class="data">
+    <thead><tr><th>When</th><th>Kind</th><th>Event</th><th>Note</th></tr></thead>
+    <tbody>
+    {% for j in journal %}
+      <tr><td class="meta">{{ j.entry_at }}</td><td>{{ j.kind }}</td>
+          <td>{{ j.event or "—" }}</td><td>{{ j.body }}</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% else %}<p class="empty">Journal is empty — <code>mm journal --add "..."</code>.</p>{% endif %}
+</section>
+{% endblock %}

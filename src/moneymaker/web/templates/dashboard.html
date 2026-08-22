@@ -1,0 +1,69 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="tiles">
+  <div class="tile">
+    <div class="tile-label">Your rank · {{ board }}</div>
+    <div class="tile-value">{{ self_rank if self_rank else "—" }}<span class="tile-sub">/ {{ n_managers }}</span></div>
+  </div>
+  <div class="tile">
+    <div class="tile-label">{% if gap_money is not none and gap_money <= 0 %}Cushion inside the money{% else %}Gap to the money (top {{ paid }}){% endif %}</div>
+    <div class="tile-value {{ 'good' if gap_money is not none and gap_money <= 0 }}">
+      {{ (gap_money if gap_money >= 0 else -gap_money)|money if gap_money is not none else "—" }}
+    </div>
+  </div>
+  <div class="tile">
+    <div class="tile-label">Remaining events (with preds)</div>
+    <div class="tile-value">{{ remaining|length }}</div>
+  </div>
+  <div class="tile">
+    <div class="tile-label">Purse still on the table</div>
+    <div class="tile-value">{{ pot_left|money }}</div>
+  </div>
+</section>
+
+<section class="cols">
+  <div class="card grow">
+    <div class="card-head">
+      <h2>Standings</h2>
+      <div class="seg-tabs">
+        {% for b in boards %}
+        <a class="seg-tab {{ 'active' if b == board }}" href="/?board={{ b }}">{{ b|replace("segment","Seg ")|title }}</a>
+        {% endfor %}
+      </div>
+    </div>
+    {% if standings %}
+    <table class="data">
+      <thead><tr><th>#</th><th>Manager</th><th class="num">Total</th></tr></thead>
+      <tbody>
+        {% for r in standings %}
+        <tr class="{{ 'self-row' if r.is_self }} {{ 'money-row' if r.paid }}">
+          <td>{{ r.rank }}</td>
+          <td>{{ r.manager }}{% if r.is_self %} <span class="chip chip-self">you</span>{% endif %}
+              {% if r.paid %}<span class="chip chip-money">$</span>{% endif %}</td>
+          <td class="num">{{ r.total|money }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}<p class="empty">No standings snapshot on this board yet.</p>{% endif %}
+  </div>
+
+  <div class="card">
+    <div class="card-head"><h2>Remaining events</h2></div>
+    {% if remaining %}
+    <table class="data">
+      <thead><tr><th>Event</th><th class="num">Purse</th><th>Cut</th></tr></thead>
+      <tbody>
+      {% for e in remaining %}
+        <tr>
+          <td><a href="/pick?event={{ e.name|urlencode }}">{{ e.name }}</a></td>
+          <td class="num">{{ e.purse|money }}</td>
+          <td>{{ "no cut" if not e.has_cut else "cut" }}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    {% else %}<p class="empty">Ingest predictions to light this up.</p>{% endif %}
+  </div>
+</section>
+{% endblock %}

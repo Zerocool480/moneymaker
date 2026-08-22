@@ -1,0 +1,9 @@
+<table class="data">
+  <thead><tr><th>Slot</th><th>Assignment</th><th class="num">Score ({{ posture }})</th></tr></thead>
+  <tbody>
+  {% for p in plan %}
+    <tr><td>{{ p.slot }}</td><td>{{ p.golfer }}</td><td class="num">{{ p.ev|money }}</td></tr>
+  {% endfor %}
+  </tbody>
+  <tfoot><tr><td colspan="2">Plan total</td><td class="num strong">{{ total|money }}</td></tr></tfoot>
+</table>

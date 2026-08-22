@@ -1,0 +1,23 @@
+<div class="card-head"><h3>{{ row.display_name if row.display_name else row.player_name }}</h3></div>
+<p class="meta">{{ event }} · win {{ row.win|pct }} · top-5 {{ row.top_5|pct }} ·
+   top-20 {{ row.top_20|pct }} · makes cut {{ row.make_cut|pct0 }}</p>
+<table class="data bucket-table">
+  <thead><tr><th>Finish bucket</th><th class="num">P</th><th class="num">Pays ≈</th><th class="num">EV</th></tr></thead>
+  <tbody>
+  {% for b in buckets %}
+    <tr>
+      <td>
+        <div class="mini-bar-row">
+          <span>{{ b.label }}</span>
+          <span class="mini-bar" style="width: {{ (72 * b.p / maxp)|round(1) }}px"
+                title="{{ b.label }}: {{ b.p|pct }}"></span>
+        </div>
+      </td>
+      <td class="num">{{ b.p|pct }}</td>
+      <td class="num">{{ b.pay|money }}</td>
+      <td class="num">{{ b.ev|money }}</td>
+    </tr>
+  {% endfor %}
+  </tbody>
+  <tfoot><tr><td colspan="3">Expected value</td><td class="num strong">{{ total_ev|money }}</td></tr></tfoot>
+</table>

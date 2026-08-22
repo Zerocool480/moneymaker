@@ -1,0 +1,63 @@
+<section class="tiles">
+  <div class="tile hero">
+    <div class="tile-label">P(1st)</div>
+    <div class="tile-value">{{ res.p_first|pct }}</div>
+  </div>
+  <div class="tile">
+    <div class="tile-label">P(top 3)</div>
+    <div class="tile-value">{{ res.p_top3|pct }}</div>
+  </div>
+  <div class="tile">
+    <div class="tile-label">P(top 6)</div>
+    <div class="tile-value">{{ res.p_top6|pct }}</div>
+  </div>
+</section>
+<p class="meta">{{ events|join(" · ") }} — n={{ "{:,}".format(n) }} — {{ note }}</p>
+
+<section class="cols">
+  <div class="card">
+    <div class="card-head"><h3>Finish distribution</h3></div>
+    <div class="barlist" role="img" aria-label="Probability of each finishing position">
+      {% for d in dist %}
+      <div class="barlist-row" title="Finish {{ d.k }}: {{ d.p|pct }}">
+        <span class="barlist-label">{{ d.k }}{{ {1:"st",2:"nd",3:"rd"}.get(d.k, "th") }}</span>
+        <span class="barlist-track"><span class="barlist-fill" style="width: {{ (100 * d.p / maxp)|round(1) }}%"></span></span>
+        <span class="barlist-value">{{ d.p|pct }}</span>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+
+  <div class="card grow">
+    <div class="card-head"><h3>Threats — P(finishes ahead of you)</h3></div>
+    <table class="data">
+      <thead><tr><th>Manager</th><th class="num">P(ahead)</th><th></th>
+        <th class="num">Gap now</th><th class="num">Sim EV added</th></tr></thead>
+      <tbody>
+      {% for t in threats %}
+        <tr>
+          <td>{{ t.manager }}</td>
+          <td class="num">{{ t.p|pct }}</td>
+          <td class="cell-bar"><span class="cell-fill" style="width: {{ (60 * t.p)|round(1) }}px" title="{{ t.p|pct }}"></span></td>
+          <td class="num">{{ t.gap|money }}</td>
+          <td class="num">{{ t.ev|money }}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+
+{% if band %}
+<section class="card">
+  <div class="card-head"><h3>Sensitivity band</h3></div>
+  <p class="meta">Key rival: {{ band.rival }} — metric range {{ band.lo|pct }} – {{ band.hi|pct }}</p>
+  <table class="data narrow">
+    <tbody>
+    {% for name, v in band.rows %}
+      <tr><td>{{ name|replace("_"," ") }}</td><td class="num">{{ v|pct }}</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</section>
+{% endif %}

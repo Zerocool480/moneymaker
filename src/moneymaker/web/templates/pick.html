@@ -1,0 +1,77 @@
+{% extends "base.html" %}
+{% block content %}
+{% if not pred_events %}
+  <p class="empty">No events with predictions yet — <code>mm ingest-preds</code> or <code>mm fetch-preds</code> first.</p>
+{% else %}
+<section class="card">
+  <div class="card-head">
+    <h2>Best available{% if event_row %} — {{ event_row.name }}{% endif %}</h2>
+    <form method="get" action="/pick" class="inline-form">
+      <select name="event" onchange="this.form.submit()">
+        {% for e in pred_events %}
+        <option value="{{ e.name }}" {{ "selected" if event_row and e.event_id == event_row.event_id }}>{{ e.name }}</option>
+        {% endfor %}
+      </select>
+      <div class="seg-tabs">
+        {% for p in ["neutral", "leading", "trailing"] %}
+        <button class="seg-tab {{ 'active' if posture == p }}" name="posture" value="{{ p }}">{{ p|title }}</button>
+        {% endfor %}
+      </div>
+    </form>
+  </div>
+  {% if event_row %}
+  <p class="meta">Purse {{ purse|money }} · {{ "no cut" if not event_row.has_cut else "cut event" }} ·
+     preds {{ pulled_at }} · {{ used_count }} used · {{ inel_count }} ineligible</p>
+  <div class="cols">
+    <table class="data grow board-table">
+      <thead><tr><th>#</th><th>Golfer</th><th class="num">Win</th><th class="num">Top 5</th>
+        <th class="num">Cut</th><th class="num">EV</th><th class="num">Floor</th>
+        <th class="num">Score</th><th>Flags</th></tr></thead>
+      <tbody>
+      {% for r in board_rows %}
+        <tr class="clickable {{ 'flagged' if r.flags }}"
+            hx-get="/pick/why?event={{ event_row.name|urlencode }}&key={{ r.key|urlencode }}"
+            hx-target="#why-panel" hx-swap="innerHTML">
+          <td>{{ loop.index }}</td>
+          <td>{{ r.display_name }}</td>
+          <td class="num">{{ r.win|pct }}</td>
+          <td class="num">{{ r.top_5|pct }}</td>
+          <td class="num">{{ r.make_cut|pct0 }}</td>
+          <td class="num">{{ r.exp|money }}</td>
+          <td class="num">{{ r.floor|money }}</td>
+          <td class="num strong">{{ r.score|money }}</td>
+          <td>{% if r.flags %}<span class="chip chip-flag">{{ r.flags }}</span>{% endif %}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    <aside class="side-panel">
+      <div id="why-panel" class="card">
+        <p class="empty">Click a golfer for the why-panel: bucket-by-bucket EV.</p>
+      </div>
+      <div class="card">
+        <div class="card-head"><h3>Rival reads</h3></div>
+        {% if rivals %}
+        <table class="data">
+          <tbody>
+          {% for r in rivals %}
+            <tr>
+              <td>{{ r.manager }}</td>
+              <td>
+                {% for name, p in r.picks %}
+                  <span class="chip {{ 'chip-locked' if r.locked }}">{{ name }}{% if p is not none %} {{ p|pct0 }}{% endif %}</span>
+                {% endfor %}
+                {% if r.locked %}<span class="meta">locked</span>{% endif %}
+              </td>
+            </tr>
+          {% endfor %}
+          </tbody>
+        </table>
+        {% else %}<p class="empty">No rival projections available.</p>{% endif %}
+      </div>
+    </aside>
+  </div>
+  {% endif %}
+</section>
+{% endif %}
+{% endblock %}

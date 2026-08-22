@@ -1,0 +1,45 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="card">
+  <div class="card-head"><h2>Season map</h2></div>
+  <table class="data">
+    <thead><tr><th>#</th><th>Event</th><th>Seg</th><th class="num">Purse</th>
+      <th>Field</th><th>Status</th><th>Your pick</th><th class="num">Earned</th></tr></thead>
+    <tbody>
+    {% for e in schedule %}
+      <tr class="status-{{ e.status }}">
+        <td>{{ e.seq + 1 }}</td>
+        <td>{{ e.name }}{% if e.picks_per_manager == 2 %} <span class="chip chip-major">major ×2</span>{% endif %}</td>
+        <td>{{ e.segment }}</td>
+        <td class="num">{{ e.purse|money }}</td>
+        <td>{{ "strong" if e.strong else "open" }}</td>
+        <td><span class="chip chip-{{ e.status }}">{{ e.status }}</span></td>
+        <td>{{ e.pick or "—" }}</td>
+        <td class="num">{{ e.earned|money if e.earned is not none else "—" }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</section>
+
+<section class="card">
+  <div class="card-head"><h2>Plan the rest of the season</h2></div>
+  <form hx-post="/season/plan" hx-target="#plan-result" hx-indicator="#plan-spin"
+        class="inline-form">
+    <label class="field">Posture
+      <select name="posture">
+        <option value="neutral">Neutral</option>
+        <option value="leading">Leading (protect)</option>
+        <option value="trailing">Trailing (chase)</option>
+      </select>
+    </label>
+    <label class="field">Reserve (comma-separated)
+      <input type="text" name="reserve" placeholder="Scheffler, Scottie">
+    </label>
+    <label class="field">Top-k <input type="number" name="top_k" value="8" min="3" max="15"></label>
+    <button class="btn primary" type="submit">Solve assignment</button>
+    <span id="plan-spin" class="spinner htmx-indicator">solving…</span>
+  </form>
+  <div id="plan-result"></div>
+</section>
+{% endblock %}

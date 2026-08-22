@@ -1,0 +1,40 @@
+<section class="card">
+  <div class="card-head"><h3>{{ event }} — you hold: {{ mine|join(", ") if mine else "no pick" }}</h3></div>
+  <p class="meta">{{ n_players }} players still standing.</p>
+  {% for m, name in amateurs %}
+  <p class="callout critical">{{ m }} holds AMATEUR {{ name }} — $0 whatever he shoots.</p>
+  {% endfor %}
+  <div class="cols">
+    <div class="card">
+      <div class="card-head"><h4>Board finish tonight</h4></div>
+      <div class="barlist" role="img" aria-label="Finish position probabilities">
+        {% for d in dist %}
+        <div class="barlist-row" title="Finish {{ d.k }}: {{ d.p|pct }}">
+          <span class="barlist-label">{{ d.k }}{{ {1:"st",2:"nd",3:"rd"}.get(d.k, "th") }}</span>
+          <span class="barlist-track"><span class="barlist-fill" style="width: {{ (100 * d.p / maxp)|round(1) }}%"></span></span>
+          <span class="barlist-value">{{ d.p|pct }}</span>
+        </div>
+        {% endfor %}
+      </div>
+    </div>
+    <div class="card grow">
+      <div class="card-head"><h4>Pass thresholds — rivals ahead of you</h4></div>
+      {% if thresholds %}
+      <table class="data">
+        <thead><tr><th>Manager</th><th class="num">Gap</th><th>Needs</th><th class="num">Pays</th><th class="num">P(you pass)</th></tr></thead>
+        <tbody>
+        {% for t in thresholds %}
+          <tr>
+            <td>{{ t.manager }}</td>
+            <td class="num">{{ t.gap|money }}</td>
+            <td>{{ t.needs }}</td>
+            <td class="num">{{ t.pays|money if t.pays else "—" }}</td>
+            <td class="num strong">{{ t.p_pass|pct }}</td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+      {% else %}<p class="empty">Nobody ahead of you. Protect the lead.</p>{% endif %}
+    </div>
+  </div>
+</section>
