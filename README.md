@@ -23,6 +23,10 @@ mm opponents                                   # rival tendency profiles
 mm backtest --league-dir data/2026/league --preds-dir data/2026/datagolf
 ```
 
-Housekeeping: `mm set-self`, `mm flag-liv "Rahm, Jon"`, `mm journal --add "..."`.
+Housekeeping: `mm set-self`, `mm flag-liv "Rahm, Jon"`, `mm journal --add "..."`,
+`mm set-field-type "bmw" playoff50`.
 DB path: `--db` or `MM_DB` (default `data/moneymaker.db`). Season: `--season`
 or `MM_SEASON` (defaults to the latest ingested season).
+
+DataGolf key (for `mm fetch-preds`): set `DATAGOLF_API_KEY`, or put the key
+alone in `data/datagolf.key` — `data/` is gitignored, so it never reaches git.

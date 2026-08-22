@@ -152,7 +152,11 @@ def fetch_preds(event: str = typer.Option(..., "--event"),
     conn = _conn(db)
     season = _season(conn, season)
     erow = store.resolve_event(conn, season, event)
-    d = DataGolfAPI().pre_tournament_preds(tour)
+    try:
+        d = DataGolfAPI().pre_tournament_preds(tour)
+    except RuntimeError as e:
+        typer.echo(str(e))
+        raise typer.Exit(1)
     s = store.ingest_preds_frame(conn, d, erow["event_id"], "api")
     typer.echo(f"{erow['name']}: {s['rows']} golfers from API, "
                f"has_cut={s['has_cut']}")

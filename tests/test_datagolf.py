@@ -18,10 +18,41 @@ def test_no_cut_autodetect(travelers_csv):
     assert d.attrs["has_cut"] is False
 
 
-def test_api_requires_key(monkeypatch):
+def test_api_requires_key(monkeypatch, tmp_path):
     monkeypatch.delenv("DATAGOLF_API_KEY", raising=False)
+    monkeypatch.chdir(tmp_path)               # no data/datagolf.key here
     with pytest.raises(RuntimeError, match="DATAGOLF_API_KEY"):
         DataGolfAPI()
+
+
+def test_api_key_file_fallback(monkeypatch, tmp_path):
+    monkeypatch.delenv("DATAGOLF_API_KEY", raising=False)
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "data").mkdir()
+    (tmp_path / "data" / "datagolf.key").write_text("k-from-file\n")
+    assert DataGolfAPI().key == "k-from-file"
+
+
+def test_api_network_error_is_actionable():
+    import urllib.error
+
+    def blocked(url, timeout=None):
+        raise urllib.error.URLError("Tunnel connection failed: 403 Forbidden")
+
+    api = DataGolfAPI(key="k123", opener=blocked)
+    with pytest.raises(RuntimeError, match="network policy"):
+        api.pre_tournament_preds()
+
+
+def test_api_contract_drift_is_reported():
+    body = b"player_name,something_else\nA B,1\n"
+
+    def fake_open(url, timeout=None):
+        return _FakeResp(body)
+
+    api = DataGolfAPI(key="k123", opener=fake_open)
+    with pytest.raises(RuntimeError, match="missing expected columns"):
+        api.pre_tournament_preds()
 
 
 class _FakeResp(io.BytesIO):

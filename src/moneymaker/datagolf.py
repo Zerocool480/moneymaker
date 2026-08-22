@@ -1,6 +1,7 @@
 """DataGolf ingestion: CSV now, API phase 2 (same column contract)."""
 import io
 import os
+import urllib.error
 import urllib.parse
 import urllib.request
 
@@ -28,29 +29,75 @@ def load_preds_csv(path) -> pd.DataFrame:
     return _finish(pd.read_csv(path))
 
 
+KEY_FILE = os.path.join("data", "datagolf.key")   # gitignored (data/)
+
+
+def _resolve_key(key: str | None) -> str | None:
+    if key:
+        return key
+    env = os.environ.get("DATAGOLF_API_KEY")
+    if env:
+        return env.strip()
+    try:
+        with open(KEY_FILE) as fh:
+            return fh.read().strip() or None
+    except OSError:
+        return None
+
+
 class DataGolfAPI:
     """Thin client for https://feeds.datagolf.com (phase 2). Returns frames in
-    the exact CSV contract shape so everything downstream is source-agnostic."""
+    the exact CSV contract shape so everything downstream is source-agnostic.
+    Key lookup: explicit arg -> DATAGOLF_API_KEY env -> data/datagolf.key
+    (a one-line file; data/ is gitignored so the secret never hits git)."""
 
     BASE = "https://feeds.datagolf.com"
 
     def __init__(self, key: str | None = None, opener=None):
-        self.key = key or os.environ.get("DATAGOLF_API_KEY")
+        self.key = _resolve_key(key)
         if not self.key:
             raise RuntimeError(
-                "DataGolf API key missing: set DATAGOLF_API_KEY or use CSV "
-                "ingestion (mm ingest-preds).")
+                "DataGolf API key missing: set DATAGOLF_API_KEY, or put the "
+                "key alone in data/datagolf.key, or use CSV ingestion "
+                "(mm ingest-preds).")
         self._open = opener or urllib.request.urlopen
 
-    def _get_csv(self, path: str, **params) -> pd.DataFrame:
+    def _get_csv(self, path: str, required=("player_name",), **params
+                 ) -> pd.DataFrame:
         params = {"file_format": "csv", "key": self.key, **params}
         url = f"{self.BASE}/{path}?{urllib.parse.urlencode(params)}"
-        with self._open(url, timeout=30) as resp:
-            raw = resp.read()
-        return pd.read_csv(io.BytesIO(raw))
+        try:
+            with self._open(url, timeout=30) as resp:
+                raw = resp.read()
+        except urllib.error.HTTPError as e:      # never echo the URL (key!)
+            body = e.read()[:200].decode("utf-8", "replace")
+            raise RuntimeError(
+                f"DataGolf API rejected {path} (HTTP {e.code}): {body!r} — "
+                "check the key and your subscription tier.") from None
+        except urllib.error.URLError as e:
+            raise RuntimeError(
+                f"cannot reach feeds.datagolf.com ({e.reason}). If this "
+                "machine restricts outbound traffic (e.g. a Claude Code "
+                "remote environment), allow feeds.datagolf.com in its "
+                "network policy. CSV ingestion (mm ingest-preds) works "
+                "offline.") from None
+        try:
+            d = pd.read_csv(io.BytesIO(raw))
+        except Exception:
+            raise RuntimeError(
+                f"DataGolf {path} did not return CSV; first bytes: "
+                f"{raw[:200].decode('utf-8', 'replace')!r}") from None
+        missing = set(required) - set(d.columns)
+        if missing:
+            raise RuntimeError(
+                f"DataGolf {path} response is missing expected columns "
+                f"{sorted(missing)}; got {list(d.columns)[:15]} — the feed "
+                "contract may have changed, please report this.")
+        return d
 
     def pre_tournament_preds(self, tour: str = "pga") -> pd.DataFrame:
         d = self._get_csv("preds/pre-tournament", tour=tour,
+                          required=("player_name", *COLS),
                           odds_format="percent", dead_heat="no")
         # Percent -> probability if the feed returned 0-100 numbers.
         for c in COLS:
