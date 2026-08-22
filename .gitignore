@@ -1,0 +1,14 @@
+__pycache__/
+*.pyc
+*.egg-info/
+.pytest_cache/
+build/
+dist/
+.venv/
+venv/
+
+# League data & local DB stay out of the repo (private league info)
+data/
+*.db
+*.sqlite3
+backtests/*.json
