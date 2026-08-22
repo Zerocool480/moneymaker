@@ -563,6 +563,40 @@ def journal(add: str = typer.Option(None, "--add"),
     typer.echo(df.to_string(index=False) if len(df) else "journal empty.")
 
 
+@app.command("eval-opponents")
+def eval_opponents_cmd(league_dir: str = typer.Option(..., "--league-dir"),
+                       preds_dir: str = typer.Option(..., "--preds-dir"),
+                       manager: str = typer.Option(None, "--manager"),
+                       purse: list[str] = typer.Option([], "--purse"),
+                       season: int = SEASON_OPT):
+    """Walk-forward rival-pick prediction shoot-out: validated baseline vs
+    posture-aware variant, scored on what rivals actually picked."""
+    season = int(season or _dt.date.today().year)
+    overrides = {}
+    for p in purse:
+        frag, _, mmn = p.partition("=")
+        overrides[frag.strip()] = float(mmn) * 1e6
+    df, summary, details = backtest_mod.eval_opponents(
+        league_dir, preds_dir, season, manager, overrides)
+    for _, r in df.iterrows():
+        typer.echo(f"  {r['event']:<26} rivals {r['rivals']:>3}   "
+                   f"base {_pct(r['base_top1'])}/{_pct(r['base_top3'])}   "
+                   f"postured {_pct(r['post_top1'])}/{_pct(r['post_top3'])}   "
+                   f"{r['postures']}")
+    typer.echo(f"\n{summary['rival_predictions']} rival-week predictions "
+               "(top-1 / top-3 hit rate):")
+    typer.echo(f"  baseline heuristic   {_pct(summary['baseline_top1'])} / "
+               f"{_pct(summary['baseline_top3'])}")
+    typer.echo(f"  posture-aware        {_pct(summary['postured_top1'])} / "
+               f"{_pct(summary['postured_top3'])}")
+    edge = summary["postured_top1"] - summary["baseline_top1"]
+    verdict = ("posture-aware WINS — consider flipping the default"
+               if edge > 0.01 else
+               "baseline holds — keep posture_aware off "
+               f"(edge {100 * edge:+.1f} pts is inside the noise)")
+    typer.echo(f"  -> {verdict}")
+
+
 @app.command("set-purse")
 def set_purse(event: str, millions: float,
               season: int = SEASON_OPT, db: str = DB_OPT):

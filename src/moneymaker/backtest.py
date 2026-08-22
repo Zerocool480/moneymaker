@@ -11,7 +11,7 @@ import os
 
 import pandas as pd
 
-from . import league, store
+from . import league, opponents as opp, store
 from .datagolf import load_preds_csv
 from .ev import board as ev_board
 
@@ -145,3 +145,145 @@ def replay(league_dir: str, preds_dir: str, season: int,
         with open(out_json, "w") as fh:
             json.dump({"summary": summary, "events": rows}, fh, indent=2)
     return df, summary
+
+
+# ------------------- opponent-model walk-forward evaluation -------------------
+
+def _asof_used(conn, season: int, before_seq: int) -> dict:
+    """manager -> set of keys picked at events strictly before before_seq."""
+    out: dict[str, set] = {}
+    for r in conn.execute(
+            "SELECT m.name, g.key FROM picks p"
+            " JOIN events e ON e.event_id=p.event_id"
+            " JOIN managers m ON m.manager_id=p.manager_id"
+            " JOIN golfers g ON g.golfer_id=p.golfer_id"
+            " WHERE p.season=? AND e.seq<?", (season, before_seq)):
+        out.setdefault(r[0], set()).add(r[1])
+    return out
+
+
+def eval_opponents(league_dir: str, preds_dir: str, season: int,
+                   manager: str | None = None,
+                   purse_overrides: dict | None = None):
+    """Walk-forward test of rival-pick prediction: for every archived event,
+    predict each manager's pick using ONLY deadline-time information, with
+    (a) the validated baseline heuristic and (b) the posture-aware variant.
+    Returns (per-event DataFrame, summary dict). Rivals-only is the headline
+    metric — the self manager picked WITH an engine and is atypical."""
+    books = _workbooks(league_dir)
+    parsed = []
+    for b in books:
+        sel, _ = league.load_selections(b)
+        groups = league.group_events(league.event_columns(sel))
+        parsed.append((b, sel, groups, _progress(sel, groups)))
+    final_wb = max(parsed, key=lambda t: t[3])[0]
+
+    fin = store.connect(":memory:")
+    store.ingest_league(fin, final_wb, season)
+    for frag, purse in (purse_overrides or {}).items():
+        erow = store.resolve_event(fin, season, frag)
+        fin.execute("UPDATE events SET purse=? WHERE event_id=?",
+                    (purse, erow["event_id"]))
+    if manager:
+        store.set_self(fin, manager)
+    self_name = manager or store.self_manager(fin)
+
+    csvs = []
+    for f in sorted(os.listdir(preds_dir)):
+        if not f.endswith(".csv"):
+            continue
+        frag = os.path.splitext(f)[0].replace("_", " ").replace("-", " ")
+        erow = _resolve_preds_event(fin, season, frag)
+        if erow is not None:
+            csvs.append((erow["seq"], f, erow))
+    csvs.sort()
+
+    rows, details = [], []
+    for seq, fname, erow in csvs:
+        preds = load_preds_csv(os.path.join(preds_dir, fname))
+        prior = [t for t in parsed if t[3] < seq]
+        dl_wb = max(prior, key=lambda t: t[3])[0] if prior else parsed[0][0]
+
+        dl = store.connect(":memory:")
+        store.ingest_league(dl, dl_wb, season)
+        for frag, purse in (purse_overrides or {}).items():
+            try:
+                e2 = store.resolve_event(dl, season, frag)
+                dl.execute("UPDATE events SET purse=? WHERE event_id=?",
+                           (purse, e2["event_id"]))
+            except KeyError:
+                pass
+        if self_name:
+            try:
+                store.set_self(dl, self_name)
+            except Exception:
+                pass
+        # prior preds give the profile miner chalk history where it exists
+        for pseq, pf, _ in csvs:
+            if pseq < seq:
+                pe = _resolve_preds_event(dl, season, os.path.splitext(pf)[0]
+                                          .replace("_", " ").replace("-", " "))
+                if pe is not None:
+                    store.ingest_preds_frame(
+                        dl, load_preds_csv(os.path.join(preds_dir, pf)),
+                        pe["event_id"], "csv")
+
+        profiles = opp.mine_profiles(dl, season)
+        dl_picks = store.picks_df(dl, season)
+        hot = opp.hot_keys(dl_picks, int(seq))
+        overall = store.latest_standings(dl, season, "overall")
+        seg_board = store.latest_standings(
+            dl, season, f"segment{erow['segment']}") if erow["segment"] else {}
+        pl_overall = opp.purse_left(dl, season, int(seq))
+        pl_segment = opp.purse_left(dl, season, int(seq),
+                                    int(erow["segment"] or 0) or None)
+        used_asof = _asof_used(fin, season, int(seq))
+        actual = store.event_picks(fin, season, erow["event_id"])
+        purse = erow["purse"] or 1e7
+        has_cut = bool(preds.attrs.get("has_cut", True))
+
+        n = b1 = b3 = p1 = p3 = 0
+        postures = {}
+        for mgr in store.managers_list(fin):
+            act = set(actual.get(mgr, []))
+            if not act:
+                continue
+            board = ev_board(preds, purse, used_asof.get(mgr, set()),
+                             has_cut=has_cut)
+            tb = [(r["exp"], r["key"], r["key"] in hot, r["win"], r["floor"])
+                  for _, r in board.head(12).iterrows()]
+            prof = profiles.get(mgr, opp.Profile(manager=mgr))
+            base = opp.rank_candidates(prof, tb, None)
+            posture = opp.posture_for(mgr, overall, seg_board,
+                                      pl_overall, pl_segment)
+            post = opp.rank_candidates(prof, tb, posture)
+            postures[posture] = postures.get(posture, 0) + 1
+            is_self = mgr == self_name
+            if not is_self:
+                n += 1
+                b1 += base[:1] != [] and base[0] in act
+                b3 += bool(set(base[:3]) & act)
+                p1 += post[:1] != [] and post[0] in act
+                p3 += bool(set(post[:3]) & act)
+            details.append({"event": erow["name"], "manager": mgr,
+                            "posture": posture, "actual": ", ".join(act),
+                            "base_top1": base[0] if base else None,
+                            "post_top1": post[0] if post else None,
+                            "is_self": is_self})
+        rows.append({"event": erow["name"], "rivals": n,
+                     "base_top1": b1 / n if n else 0.0,
+                     "base_top3": b3 / n if n else 0.0,
+                     "post_top1": p1 / n if n else 0.0,
+                     "post_top3": p3 / n if n else 0.0,
+                     "postures": postures})
+
+    df = pd.DataFrame(rows)
+    tot = df["rivals"].sum()
+    summary = {
+        "rival_predictions": int(tot),
+        "baseline_top1": float((df["base_top1"] * df["rivals"]).sum() / tot),
+        "baseline_top3": float((df["base_top3"] * df["rivals"]).sum() / tot),
+        "postured_top1": float((df["post_top1"] * df["rivals"]).sum() / tot),
+        "postured_top3": float((df["post_top3"] * df["rivals"]).sum() / tot),
+    }
+    return df, summary, pd.DataFrame(details)

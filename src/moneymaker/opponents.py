@@ -38,6 +38,76 @@ def predict_pick(profile: Profile, their_board):
     return top[1]
 
 
+# ---- posture-aware prediction (step 1 of the rival-modeling upgrade) ----
+# A rival's race position shapes their pick: in the money -> protect (floor),
+# within reach -> chase (win%-blend), out of it -> moonshot (pure win%).
+# Scoring reuses the SAME posture math the proven board uses (ev.board),
+# so nothing here is new math — only new conditioning. Walk-forward
+# evaluated against 2026 via `mm eval-opponents` before becoming a default.
+
+SEGMENT_PAID, OVERALL_PAID = 3, 6   # money lines (2026 prize structure)
+REACH = 0.11                         # ~runner-up share of remaining purse
+
+
+def money_gap(standings: dict, mgr: str, paid: int) -> float | None:
+    """Dollars to the LAST paid position (<=0 means in the money by that
+    cushion). None when the manager or the board is unknown."""
+    if not standings or mgr not in standings:
+        return None
+    totals = sorted(standings.values(), reverse=True)
+    line = totals[min(paid, len(totals)) - 1]
+    return line - standings[mgr]
+
+
+def posture_for(mgr: str, overall: dict, segment: dict,
+                purse_left_overall: float, purse_left_segment: float) -> str:
+    """'leading' | 'trailing' | 'longshot'. The overall race dominates
+    (prizes >> segment); the segment race governs when overall is gone."""
+    for standings, paid, purse_left in (
+            (overall, OVERALL_PAID, purse_left_overall),
+            (segment, SEGMENT_PAID, purse_left_segment)):
+        gap = money_gap(standings, mgr, paid)
+        if gap is None:
+            continue
+        if gap <= 0:
+            return "leading"
+        if gap <= REACH * purse_left:
+            return "trailing"
+    return "longshot"
+
+
+def rank_candidates(profile: Profile, their_board, posture: str | None = None):
+    """Ordered golfer keys, most likely first. their_board rows:
+    (exp, key, hot, win, floor); posture None reproduces the validated
+    baseline exactly (EV order + form-chaser hot override)."""
+    if not their_board:
+        return []
+    if posture == "leading":
+        score = lambda r: (r[0] + r[4]) / 2          # protect: EV/floor blend
+    elif posture == "trailing":
+        score = lambda r: r[0] * (1 + 8.0 * r[3])    # chase: win%-blend
+    elif posture == "longshot":
+        score = lambda r: (r[3], r[0])               # moonshot: pure win%
+    else:
+        score = lambda r: r[0]                       # baseline: raw EV
+    ranked = sorted(their_board, key=score, reverse=True)
+    keys = [r[1] for r in ranked]
+    if profile.form_chase_rate > 0.4:
+        top_score = score(ranked[0])
+        for r in ranked[:5]:
+            if r[2] and _ge_85pct(score(r), top_score):
+                keys.remove(r[1])
+                keys.insert(0, r[1])
+                break
+    return keys
+
+
+def _ge_85pct(s, top) -> bool:
+    if isinstance(s, tuple):                          # longshot tuple scores
+        s, top = s[0], top[0]
+    return s >= top * 0.85
+
+
 def hot_keys(picks, event_seq: int, top_n: int = 10) -> set:
     """Prior-week 'hot list': golfers in the top-N of settled earnings at the
     event before event_seq. Proxy built from picked golfers only — the sheet
@@ -79,6 +149,8 @@ def mine_profiles(conn, season: int) -> dict[str, Profile]:
                       if e.field_type == "major" and e.Index not in settled)
     liv = store.liv_keys(conn)
 
+    preds_cache = {eid: store.latest_preds(conn, eid) for eid in preds_events}
+    hot_cache: dict[int, set] = {}
     out = {}
     for mgr, mine in picks.groupby("manager"):
         is_self = bool(mine["is_self"].iloc[0])
@@ -91,10 +163,12 @@ def mine_profiles(conn, season: int) -> dict[str, Profile]:
             if not is_self and self_by_event.get(eid) and \
                     keys & self_by_event[eid]:
                 mirror += 1
-            if keys & hot_keys(picks, seq):
+            if seq not in hot_cache:
+                hot_cache[seq] = hot_keys(picks, seq)
+            if keys & hot_cache[seq]:
                 form += 1
             if eid in preds_events:
-                preds = store.latest_preds(conn, eid)
+                preds = preds_cache[eid]
                 erow = events.loc[eid]
                 inel = store.ineligible_keys(conn, erow, preds)
                 b = ev_board(preds, _purse(erow), used_before,
@@ -119,14 +193,31 @@ def mine_profiles(conn, season: int) -> dict[str, Profile]:
     return out
 
 
+def purse_left(conn, season: int, from_seq: int, segment: int | None = None,
+               default_purse: float = 1e7) -> float:
+    """Total purse still on the table from from_seq onward (majors with no
+    parsed purse count at the default)."""
+    rows = conn.execute(
+        "SELECT purse, picks_per_manager FROM events WHERE season=? AND "
+        "seq>=? AND (? IS NULL OR segment=?)",
+        (season, from_seq, segment, segment)).fetchall()
+    return sum((r["purse"] or default_purse) for r in rows) or default_purse
+
+
 def predicted_picks(conn, season: int, event_row, preds,
                     profiles: dict[str, Profile] | None = None,
-                    extra_used: dict | None = None) -> dict:
+                    extra_used: dict | None = None,
+                    posture_aware: bool = False) -> dict:
     """manager -> [predicted golfer keys] for one event (majors: as many
     slots as picks_per_manager). Locked picks (already on the sheet for this
     event) are used verbatim; everyone else gets the profile-weighted argmax
     over their remaining board, then next-best for extra major slots.
 
+    posture_aware conditions each rival's ranking on their race position.
+    Default OFF: the 2026 walk-forward eval (mm eval-opponents) scored it a
+    statistical wash vs the validated baseline (23.3% vs 23.2% top-1 over
+    850 rival-weeks; only the endgame BMW week improved). Re-evaluate with
+    2027's fuller preds archive before flipping this on.
     extra_used: manager -> keys already projected at OTHER remaining events,
     so a multi-week projection never spends a golfer twice (one-and-done)."""
     profiles = profiles or mine_profiles(conn, season)
@@ -135,6 +226,14 @@ def predicted_picks(conn, season: int, event_row, preds,
     hot = hot_keys(picks, int(event_row["seq"]))
     ineligible = store.ineligible_keys(conn, event_row, preds)
     slots = int(event_row["picks_per_manager"] or 1)
+    if posture_aware:
+        overall = store.latest_standings(conn, season, "overall")
+        seg_board = store.latest_standings(
+            conn, season, f"segment{event_row['segment']}") \
+            if event_row["segment"] else {}
+        pl_overall = purse_left(conn, season, int(event_row["seq"]))
+        pl_segment = purse_left(conn, season, int(event_row["seq"]),
+                                int(event_row["segment"] or 0) or None)
     out = {}
     for mgr in store.managers_list(conn):
         already = list(locked.get(mgr, []))
@@ -146,14 +245,14 @@ def predicted_picks(conn, season: int, event_row, preds,
         b = ev_board(preds, _purse(event_row), used,
                      has_cut=bool(event_row["has_cut"]),
                      ineligible=set(ineligible))
-        their_board = [(r["exp"], r["key"], r["key"] in hot)
-                       for _, r in b.head(12).iterrows()]
+        their_board = [(r["exp"], r["key"], r["key"] in hot, r["win"],
+                        r["floor"]) for _, r in b.head(12).iterrows()]
         prof = profiles.get(mgr, Profile(manager=mgr))
+        posture = posture_for(mgr, overall, seg_board, pl_overall,
+                              pl_segment) if posture_aware else None
+        ranked = rank_candidates(prof, their_board, posture)
         lineup = list(already)             # partial major lock: keep, extend
-        first = predict_pick(prof, their_board)
-        if first is not None and first not in lineup:
-            lineup.append(first)
-        for _, key, _ in their_board:      # extra major slots: next best EV
+        for key in ranked:                 # top slot + next-best extras
             if len(lineup) >= slots:
                 break
             if key not in lineup:
