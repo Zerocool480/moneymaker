@@ -108,6 +108,36 @@ def test_race_multi_event_accumulates_and_ranks():
     assert 0 < res["passes"]["r"] < 1
 
 
+def test_certain_distribution_matches_point_plan():
+    plans = {"E": {"me": ["x"], "r": ["y"]}}
+    res_pt = simulate_race({"me": 0.0, "r": 0.0}, plans, {"E": TWO_STARS},
+                           {"E": PURSE}, {"E": True}, "me", n=60_000, seed=9)
+    probs = {"E": {"r": ([["y"]], [1.0])}}
+    res_d = simulate_race({"me": 0.0, "r": 0.0}, plans, {"E": TWO_STARS},
+                          {"E": PURSE}, {"E": True}, "me", n=60_000, seed=9,
+                          plan_probs=probs)
+    assert abs(res_pt["passes"]["r"] - res_d["passes"]["r"]) < 0.01
+
+
+def test_sampled_lineups_mix_expected_value():
+    c = curves([("a", .10, .30, .40, .55, .85, False),
+                ("b", .10, .30, .40, .55, .85, False),
+                ("s", .0, .01, .02, .05, .50, False)])
+    plans = {"E": {"me": ["s"], "r": ["a"]}}
+    # rival is 50/50 between two identically-skilled golfers
+    probs = {"E": {"r": ([["a"], ["b"]], [0.5, 0.5])}}
+    res = simulate_race({"me": 0.0, "r": 0.0}, plans, {"E": c},
+                        {"E": PURSE}, {"E": True}, "me", n=80_000, seed=10,
+                        plan_probs=probs)
+    pt_a = simulate_race({"me": 0.0, "r": 0.0}, plans, {"E": c},
+                         {"E": PURSE}, {"E": True}, "me", n=80_000, seed=10)
+    # same expected haul as holding either one outright ...
+    assert abs(res["ev_added"]["r"] - pt_a["ev_added"]["r"]) \
+        < 0.03 * pt_a["ev_added"]["r"]
+    # ... and P(pass) in the same range (both golfers equally scary)
+    assert abs(res["passes"]["r"] - pt_a["passes"]["r"]) < 0.02
+
+
 def test_sensitivity_band_brackets_base():
     plans = {"E": {"me": ["x"], "r": ["y"]}}
     band = sensitivity_band({"me": 1e6, "r": 0.0}, plans, {"E": TWO_STARS},

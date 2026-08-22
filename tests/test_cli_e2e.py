@@ -49,6 +49,10 @@ def test_weekly_workflow(tmp_path, wb_mid, pga_csv, travelers_csv):
     assert "P(1st)" in out
     assert "Top threats" in out
     assert "Rival Two" in out
+    assert "rival picks: sampled from prior" in out   # tiny history -> prior
+
+    out = run("simulate", "--board", "overall", "--n", "2000", "--point", *base)
+    assert "point projections" in out
 
     out = run("simulate", "--board", "overall", "--n", "2000",
               "--sensitivity", *base)

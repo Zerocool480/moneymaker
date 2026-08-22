@@ -193,6 +193,54 @@ def mine_profiles(conn, season: int) -> dict[str, Profile]:
     return out
 
 
+def pick_distributions(conn, season: int, event_row, preds, beta,
+                       profiles: dict[str, Profile] | None = None,
+                       extra_used: dict | None = None,
+                       top_k: int = 8) -> dict:
+    """manager -> (lineups, probs): a calibrated distribution over each
+    unlocked manager's plausible lineups for one event, for the race sim to
+    SAMPLE (choice.py model). Locked managers get their lineup at prob 1.
+    Majors: each candidate primary pick is completed with next-best EV."""
+    from . import choice
+    profiles = profiles or mine_profiles(conn, season)
+    locked = store.event_picks(conn, season, event_row["event_id"])
+    picks = store.picks_df(conn, season)
+    hot = hot_keys(picks, int(event_row["seq"]))
+    pop = choice.popularity(conn, season, int(event_row["seq"]))
+    ineligible = store.ineligible_keys(conn, event_row, preds)
+    slots = int(event_row["picks_per_manager"] or 1)
+    out = {}
+    for mgr in store.managers_list(conn):
+        already = list(locked.get(mgr, []))
+        if len(already) >= slots:
+            out[mgr] = ([already], [1.0])
+            continue
+        used = store.used_set(conn, season, mgr) | set(already) | \
+            (extra_used or {}).get(mgr, set())
+        b = ev_board(preds, _purse(event_row), used,
+                     has_cut=bool(event_row["has_cut"]),
+                     ineligible=set(ineligible)).head(30)
+        if not len(b):
+            continue
+        X = choice.feature_matrix(b, hot, profiles.get(mgr), pop)
+        p = choice.predict_proba(beta, X)
+        order = p.argsort()[::-1][:top_k]
+        keys = list(b["key"])
+        probs = p[order]
+        probs = probs / probs.sum()
+        lineups = []
+        for i in order:
+            lineup = list(already) + [keys[i]]
+            for k in keys:                   # fill extra major slots
+                if len(lineup) >= slots:
+                    break
+                if k not in lineup:
+                    lineup.append(k)
+            lineups.append(lineup)
+        out[mgr] = (lineups, list(probs))
+    return out
+
+
 def purse_left(conn, season: int, from_seq: int, segment: int | None = None,
                default_purse: float = 1e7) -> float:
     """Total purse still on the table from from_seq onward (majors with no

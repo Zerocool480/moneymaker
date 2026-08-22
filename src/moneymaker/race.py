@@ -108,11 +108,16 @@ def simulate_race(standings: dict, plans: dict, event_curves: dict,
                   purses: dict, has_cut: dict, self_name: str,
                   n: int = 100_000, seed: int = 1,
                   split2=SPLIT2, split2140=SPLIT2140,
-                  win_scale: dict | None = None) -> dict:
+                  win_scale: dict | None = None,
+                  plan_probs: dict | None = None) -> dict:
     """Race across remaining events on one board.
 
     standings: manager -> current $ total (the board being simulated).
     plans: event -> {manager: [golfer keys]} (locked picks or projections).
+    plan_probs: optional event -> {manager: (lineups, probs)} — pick
+    UNCERTAINTY: that manager's pick is sampled per trial from their
+    distribution (overrides plans for that manager). Golfer outcomes stay
+    shared draws; only who-holds-whom varies across trials.
     event_curves / purses / has_cut: per-event inputs keyed like plans.
     Returns finish distribution for self, per-rival P(pass), EV added, and
     the raw totals matrix for downstream conditioning.
@@ -124,17 +129,31 @@ def simulate_race(standings: dict, plans: dict, event_curves: dict,
 
     for ev_key, mgr_picks in plans.items():
         curves = event_curves[ev_key]
-        tracked = sorted({k for picks in mgr_picks.values() for k in picks})
+        dists = (plan_probs or {}).get(ev_key, {})
+        tracked = {k for picks in mgr_picks.values() for k in picks}
+        for lineups, _ in dists.values():
+            tracked |= {k for lu in lineups for k in lu}
         pays = simulate_event_payouts(
-            rng, curves, tracked, purses[ev_key], has_cut[ev_key], n,
+            rng, curves, sorted(tracked), purses[ev_key], has_cut[ev_key], n,
             split2=split2, split2140=split2140, win_scale=win_scale)
-        for m, picks in mgr_picks.items():
+        zero = np.zeros(n)
+        for m in set(mgr_picks) | set(dists):
             if m not in totals:
                 continue
-            for k in picks:
-                if k in pays:
-                    totals[m] += pays[k]
-                    ev_added[m] += float(pays[k].mean())
+            if m in dists:
+                lineups, probs = dists[m]
+                paymat = np.stack(
+                    [sum((pays.get(k, zero) for k in lu), zero)
+                     for lu in lineups], axis=1)
+                idx = rng.choice(len(lineups), size=n, p=np.asarray(probs))
+                contrib = np.take_along_axis(paymat, idx[:, None], axis=1)[:, 0]
+                totals[m] += contrib
+                ev_added[m] += float(contrib.mean())
+            else:
+                for k in mgr_picks.get(m, []):
+                    if k in pays:
+                        totals[m] += pays[k]
+                        ev_added[m] += float(pays[k].mean())
 
     self_total = totals[self_name]
     rivals = {m: t for m, t in totals.items() if m != self_name}
@@ -157,13 +176,15 @@ def simulate_race(standings: dict, plans: dict, event_curves: dict,
 def sensitivity_band(standings, plans, event_curves, purses, has_cut,
                      self_name, metric: str = "p_first",
                      n: int = 30_000, seed: int = 2,
-                     key_rival: str | None = None) -> dict:
+                     key_rival: str | None = None,
+                     plan_probs: dict | None = None) -> dict:
     """ALGORITHMS s4 band: bucket splits +-0.05 and key-rival win +-50%.
     Returns {scenario: metric value} including the base case."""
     def run(split2=SPLIT2, split2140=SPLIT2140, win_scale=None):
         return simulate_race(standings, plans, event_curves, purses, has_cut,
                              self_name, n=n, seed=seed, split2=split2,
-                             split2140=split2140, win_scale=win_scale)[metric]
+                             split2140=split2140, win_scale=win_scale,
+                             plan_probs=plan_probs)[metric]
 
     out = {"base": run(),
            "splits_low": run(split2=SPLIT2 - .05, split2140=SPLIT2140 - .05),

@@ -81,17 +81,29 @@ def _remaining(conn, season, segment=None) -> list:
     return out
 
 
-def _plans(conn, season, event_rows, profiles=None):
+def _plans(conn, season, event_rows, profiles=None, beta=None,
+           self_name=None):
     """event name -> {manager: [keys]}; locked picks verbatim, projections
     (opponent model) for everyone else. Projections consume the golfer for
-    later events (one-and-done). Returns (plans, curves, purses, cuts)."""
-    plans, curves, purses, cuts = {}, {}, {}, {}
+    later events (one-and-done). When beta is given, also builds per-rival
+    pick DISTRIBUTIONS (choice model) for the sim to sample — self stays
+    deterministic (our pick is a decision, not a random variable).
+    Returns (plans, plan_probs, curves, purses, cuts)."""
+    plans, plan_probs, curves, purses, cuts = {}, {}, {}, {}, {}
     projected: dict[str, set] = {}
     for erow in sorted(event_rows, key=lambda r: r["seq"]):
         preds = store.latest_preds(conn, erow["event_id"])
         pred = opp.predicted_picks(conn, season, erow, preds, profiles,
                                    extra_used=projected)
         locked = store.event_picks(conn, season, erow["event_id"])
+        if beta is not None:                  # BEFORE this event's updates
+            dists = opp.pick_distributions(conn, season, erow, preds, beta,
+                                           profiles, extra_used=projected)
+            dists.pop(self_name, None)
+            for mgr in list(dists):           # locked = certain: points path
+                if locked.get(mgr):
+                    dists.pop(mgr)
+            plan_probs[erow["name"]] = dists
         plan = {}
         for mgr in store.managers_list(conn):
             if locked.get(mgr):
@@ -104,7 +116,7 @@ def _plans(conn, season, event_rows, profiles=None):
         curves[name] = preds
         purses[name] = _purse_of(erow)
         cuts[name] = bool(erow["has_cut"])
-    return plans, curves, purses, cuts
+    return plans, plan_probs, curves, purses, cuts
 
 
 @app.command("ingest-league")
@@ -335,6 +347,22 @@ def _defend_marks(conn, season, rows, self_name) -> dict:
     return out
 
 
+def _rival_beta(conn, season, point: bool):
+    """(beta, mode note). Sampling rival picks from a distribution is the
+    default — a point projection assigns zero probability to 3 of the 4
+    things rivals actually do (2026 measured). --point restores the old
+    behavior."""
+    if point:
+        return None, "rival picks: point projections (--point)"
+    from . import choice
+    beta = choice.fit_from_store(conn, season)
+    if beta is not None:
+        return beta, "rival picks: sampled from choice model fitted on " \
+            "this season's pick history"
+    return choice.DEFAULT_BETA, "rival picks: sampled from prior " \
+        "distribution (not enough season history to fit yet)"
+
+
 @app.command("simulate")
 def simulate_cmd(board: str = typer.Option("overall", "--board",
                                            help="overall|segment1..4"),
@@ -342,9 +370,11 @@ def simulate_cmd(board: str = typer.Option("overall", "--board",
                  seed: int = typer.Option(1, "--seed"),
                  sensitivity: bool = typer.Option(False, "--sensitivity"),
                  key_rival: str = typer.Option(None, "--key-rival"),
+                 point: bool = typer.Option(False, "--point",
+                                            help="disable pick sampling"),
                  season: int = SEASON_OPT, db: str = DB_OPT):
     """Race Monte Carlo across remaining events (F5): shared draws,
-    exclusive champion, per-rival threat decomposition."""
+    exclusive champion, sampled rival picks, per-rival threats."""
     if board != "overall" and board not in {f"segment{i}" for i in range(1, 5)}:
         typer.echo("--board must be overall or segment1..segment4")
         raise typer.Exit(1)
@@ -361,12 +391,15 @@ def simulate_cmd(board: str = typer.Option("overall", "--board",
     if not rows:
         typer.echo("No remaining events with predictions — ingest preds first.")
         raise typer.Exit(1)
+    beta, note = _rival_beta(conn, season, point)
     typer.echo(f"Simulating {board}: {len(rows)} remaining event(s), "
-               f"{len(standings)} managers, n={n:,} …")
+               f"{len(standings)} managers, n={n:,} — {note}")
     profiles = opp.mine_profiles(conn, season)
-    plans, curves, purses, cuts = _plans(conn, season, rows, profiles)
+    plans, plan_probs, curves, purses, cuts = _plans(
+        conn, season, rows, profiles, beta, self_name)
     res = race_mod.simulate_race(standings, plans, curves, purses, cuts,
-                                 self_name, n=n, seed=seed)
+                                 self_name, n=n, seed=seed,
+                                 plan_probs=plan_probs or None)
     typer.echo(f"\n{self_name} — P(1st) {_pct(res['p_first'])}   "
                f"P(top3) {_pct(res['p_top3'])}   P(top6) {_pct(res['p_top6'])}")
     typer.echo("Finish distribution: " + "  ".join(
@@ -383,7 +416,7 @@ def simulate_cmd(board: str = typer.Option("overall", "--board",
         band = race_mod.sensitivity_band(
             standings, plans, curves, purses, cuts, self_name,
             metric="p_first" if board == "overall" else "p_top3",
-            key_rival=kr)
+            key_rival=kr, plan_probs=plan_probs or None)
         lo, hi = band.pop("band")
         typer.echo(f"\nSensitivity ({'P(1st)' if board == 'overall' else 'P(top3)'},"
                    f" key rival {kr}): {_pct(lo)} – {_pct(hi)}")
@@ -394,8 +427,10 @@ def simulate_cmd(board: str = typer.Option("overall", "--board",
 @app.command("threats")
 def threats(event: str = typer.Option(..., "--event"),
             n: int = typer.Option(50_000, "--n"),
+            point: bool = typer.Option(False, "--point",
+                                       help="disable pick sampling"),
             season: int = SEASON_OPT, db: str = DB_OPT):
-    """Threat board for one event (F7): locked/predicted rival picks and
+    """Threat board for one event (F7): locked/sampled rival picks and
     P(pass) if the event plays out (overall board)."""
     conn = _conn(db)
     season = _season(conn, season)
@@ -404,21 +439,37 @@ def threats(event: str = typer.Option(..., "--event"),
     standings = store.latest_standings(conn, season, "overall") or \
         {m: 0.0 for m in store.managers_list(conn)}
     profiles = opp.mine_profiles(conn, season)
-    plans, curves, purses, cuts = _plans(conn, season, [erow], profiles)
+    beta, note = _rival_beta(conn, season, point)
+    plans, plan_probs, curves, purses, cuts = _plans(
+        conn, season, [erow], profiles, beta, self_name)
     locked = store.event_picks(conn, season, erow["event_id"])
     res = race_mod.simulate_race(standings, plans, curves, purses, cuts,
-                                 self_name, n=n)
+                                 self_name, n=n,
+                                 plan_probs=plan_probs or None)
     my = plans[erow["name"]].get(self_name, ["?"])
     typer.echo(f"{erow['name']} — you: {', '.join(my)} "
-               f"({'locked' if locked.get(self_name) else 'projected'})\n")
+               f"({'locked' if locked.get(self_name) else 'projected'}) "
+               f"— {note}\n")
     disp = dict(zip(curves[erow["name"]]["key"],
                     curves[erow["name"]]["display_name"]))
+    dists = (plan_probs or {}).get(erow["name"], {})
     rows_out = sorted(res["passes"].items(), key=lambda kv: -kv[1])[:20]
     for m, p in rows_out:
-        picks = plans[erow["name"]].get(m, [])
-        tag = "locked" if locked.get(m) else "proj"
-        mirror = " MIRROR" if set(picks) & set(my) else ""
-        names = ", ".join(disp.get(k, k) for k in picks) or "-"
+        if locked.get(m):
+            names = ", ".join(disp.get(k, k) for k in locked[m])
+            tag = "locked"
+        elif m in dists:
+            lineups, probs = dists[m]
+            names = ", ".join(disp.get(k, k) for k in lineups[0])
+            tag = f"{probs[0]:.0%} likely"
+        else:
+            names = ", ".join(disp.get(k, k)
+                              for k in plans[erow["name"]].get(m, [])) or "-"
+            tag = "proj"
+        top_keys = set(locked.get(m, []) or
+                       (dists[m][0][0] if m in dists else
+                        plans[erow["name"]].get(m, [])))
+        mirror = " MIRROR" if top_keys & set(my) else ""
         typer.echo(f"  {m:<28} {_pct(p):>7}   {names} ({tag}){mirror}")
 
 
@@ -579,22 +630,39 @@ def eval_opponents_cmd(league_dir: str = typer.Option(..., "--league-dir"),
     df, summary, details = backtest_mod.eval_opponents(
         league_dir, preds_dir, season, manager, overrides)
     for _, r in df.iterrows():
+        ll = f"ll {r['choice_ll']:.2f}" if r["choice_ll"] is not None else ""
+        cold = " (cold)" if r["cold_start"] else ""
         typer.echo(f"  {r['event']:<26} rivals {r['rivals']:>3}   "
                    f"base {_pct(r['base_top1'])}/{_pct(r['base_top3'])}   "
-                   f"postured {_pct(r['post_top1'])}/{_pct(r['post_top3'])}   "
-                   f"{r['postures']}")
+                   f"choice {_pct(r['choice_top1'])}/{_pct(r['choice_top3'])} "
+                   f"{ll}{cold}")
     typer.echo(f"\n{summary['rival_predictions']} rival-week predictions "
                "(top-1 / top-3 hit rate):")
     typer.echo(f"  baseline heuristic   {_pct(summary['baseline_top1'])} / "
                f"{_pct(summary['baseline_top3'])}")
     typer.echo(f"  posture-aware        {_pct(summary['postured_top1'])} / "
                f"{_pct(summary['postured_top3'])}")
-    edge = summary["postured_top1"] - summary["baseline_top1"]
-    verdict = ("posture-aware WINS — consider flipping the default"
-               if edge > 0.01 else
-               "baseline holds — keep posture_aware off "
-               f"(edge {100 * edge:+.1f} pts is inside the noise)")
-    typer.echo(f"  -> {verdict}")
+    typer.echo(f"  choice model         {_pct(summary['choice_top1'])} / "
+               f"{_pct(summary['choice_top3'])}")
+    if summary["choice_ll"] is not None:
+        typer.echo(
+            "\nDistribution quality — mean log-loss on fitted weeks "
+            "(lower is better; geometric-mean prob on the actual pick):\n"
+            f"  choice model   {summary['choice_ll']:.3f}  "
+            f"(p≈{np.exp(-summary['choice_ll']):.1%})\n"
+            f"  EV-only softmax {summary['ev_ll']:.3f}  "
+            f"(p≈{np.exp(-summary['ev_ll']):.1%})\n"
+            f"  uniform board  {summary['unif_ll']:.3f}  "
+            f"(p≈{np.exp(-summary['unif_ll']):.1%})")
+        # Sampling beats point-mass whenever a fitted softmax beats uniform
+        # (a point pick puts probability 0 on ~3 of 4 actual outcomes).
+        # Whether the behavioral features beat EV-only needs a real margin.
+        margin = summary["ev_ll"] - summary["choice_ll"]
+        verdict = ("sampling VALIDATED; behavioral features earning "
+                   f"(-{margin:.3f} nats vs EV-only)" if margin > 0.02 else
+                   "sampling VALIDATED; behavioral features ~neutral vs "
+                   "EV-only so far (keep collecting seasons)")
+        typer.echo(f"  -> {verdict}")
 
 
 @app.command("set-purse")

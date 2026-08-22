@@ -9,9 +9,10 @@ Majors compare like with like: engine and actual EVs both cover every slot.
 import json
 import os
 
+import numpy as np
 import pandas as pd
 
-from . import league, opponents as opp, store
+from . import choice, league, opponents as opp, store
 from .datagolf import load_preds_csv
 from .ev import board as ev_board
 
@@ -198,7 +199,7 @@ def eval_opponents(league_dir: str, preds_dir: str, season: int,
             csvs.append((erow["seq"], f, erow))
     csvs.sort()
 
-    rows, details = [], []
+    rows, details, train_rows = [], [], []
     for seq, fname, erow in csvs:
         preds = load_preds_csv(os.path.join(preds_dir, fname))
         prior = [t for t in parsed if t[3] < seq]
@@ -242,14 +243,28 @@ def eval_opponents(league_dir: str, preds_dir: str, season: int,
         purse = erow["purse"] or 1e7
         has_cut = bool(preds.attrs.get("has_cut", True))
 
-        n = b1 = b3 = p1 = p3 = 0
+        pop = choice.popularity(fin, season, int(seq))
+        beta = choice.fit(train_rows) if train_rows else None
+        used_default_beta = beta is None
+        if beta is None:
+            beta = choice.DEFAULT_BETA
+        beta_ev = None
+        if train_rows:
+            ev_rows = [(X[:, :1], c) for X, c in train_rows]
+            beta_ev = choice.fit(ev_rows, beta0=np.array([1.5]))
+        if beta_ev is None:
+            beta_ev = np.array([choice.DEFAULT_BETA[0]])
+
+        n = b1 = b3 = p1 = p3 = c1 = c3 = 0
+        lls, ev_lls, unif_lls = [], [], []
         postures = {}
+        new_rows = []
         for mgr in store.managers_list(fin):
             act = set(actual.get(mgr, []))
             if not act:
                 continue
             board = ev_board(preds, purse, used_asof.get(mgr, set()),
-                             has_cut=has_cut)
+                             has_cut=has_cut).head(60)
             tb = [(r["exp"], r["key"], r["key"] in hot, r["win"], r["floor"])
                   for _, r in board.head(12).iterrows()]
             prof = profiles.get(mgr, opp.Profile(manager=mgr))
@@ -258,32 +273,67 @@ def eval_opponents(league_dir: str, preds_dir: str, season: int,
                                       pl_overall, pl_segment)
             post = opp.rank_candidates(prof, tb, posture)
             postures[posture] = postures.get(posture, 0) + 1
+
+            keys = list(board["key"])
+            X = choice.feature_matrix(board, hot, prof, pop)
+            proba = choice.predict_proba(beta, X)
+            ranked = [keys[i] for i in proba.argsort()[::-1]]
+            proba_ev = choice.predict_proba(beta_ev, X[:, :1])
             is_self = mgr == self_name
+            for k in act:                       # log-loss per slot decision
+                if k in keys:
+                    i = keys.index(k)
+                    if not is_self:
+                        lls.append(-np.log(max(proba[i], 1e-12)))
+                        ev_lls.append(-np.log(max(proba_ev[i], 1e-12)))
+                        unif_lls.append(np.log(len(keys)))
+                    new_rows.append((X, i))
             if not is_self:
                 n += 1
                 b1 += base[:1] != [] and base[0] in act
                 b3 += bool(set(base[:3]) & act)
                 p1 += post[:1] != [] and post[0] in act
                 p3 += bool(set(post[:3]) & act)
+                c1 += ranked[:1] != [] and ranked[0] in act
+                c3 += bool(set(ranked[:3]) & act)
             details.append({"event": erow["name"], "manager": mgr,
                             "posture": posture, "actual": ", ".join(act),
                             "base_top1": base[0] if base else None,
                             "post_top1": post[0] if post else None,
+                            "choice_top1": ranked[0] if ranked else None,
                             "is_self": is_self})
+        train_rows.extend(new_rows)
         rows.append({"event": erow["name"], "rivals": n,
                      "base_top1": b1 / n if n else 0.0,
                      "base_top3": b3 / n if n else 0.0,
                      "post_top1": p1 / n if n else 0.0,
                      "post_top3": p3 / n if n else 0.0,
+                     "choice_top1": c1 / n if n else 0.0,
+                     "choice_top3": c3 / n if n else 0.0,
+                     "choice_ll": float(np.mean(lls)) if lls else None,
+                     "ev_ll": float(np.mean(ev_lls)) if ev_lls else None,
+                     "unif_ll": float(np.mean(unif_lls)) if unif_lls else None,
+                     "cold_start": used_default_beta,
                      "postures": postures})
 
     df = pd.DataFrame(rows)
     tot = df["rivals"].sum()
+    warm = df[~df["cold_start"]]
+    wtot = warm["rivals"].sum()
     summary = {
         "rival_predictions": int(tot),
         "baseline_top1": float((df["base_top1"] * df["rivals"]).sum() / tot),
         "baseline_top3": float((df["base_top3"] * df["rivals"]).sum() / tot),
         "postured_top1": float((df["post_top1"] * df["rivals"]).sum() / tot),
         "postured_top3": float((df["post_top3"] * df["rivals"]).sum() / tot),
+        "choice_top1": float((df["choice_top1"] * df["rivals"]).sum() / tot),
+        "choice_top3": float((df["choice_top3"] * df["rivals"]).sum() / tot),
+        # log-loss comparison on FITTED weeks only (cold start excluded)
+        "choice_ll": float((warm["choice_ll"] * warm["rivals"]).sum() / wtot)
+        if wtot else None,
+        "ev_ll": float((warm["ev_ll"] * warm["rivals"]).sum() / wtot)
+        if wtot else None,
+        "unif_ll": float((warm["unif_ll"] * warm["rivals"]).sum() / wtot)
+        if wtot else None,
     }
     return df, summary, pd.DataFrame(details)

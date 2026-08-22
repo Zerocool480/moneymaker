@@ -21,7 +21,13 @@ mm sequence --reserve "Scheffler, Scottie"     # whole-season assignment
 mm simulate --board overall --n 300000 --sensitivity
 mm opponents                                   # rival tendency profiles
 mm backtest --league-dir data/2026/league --preds-dir data/2026/datagolf
+mm eval-opponents --league-dir ... --preds-dir ...   # rival-model shootout
 ```
+
+Rival picks in `simulate`/`threats` are SAMPLED per trial from a
+conditional-logit choice model fitted on the season's pick history
+(calibrated on 2026: stated 23.0% top-pick confidence vs 23.2% observed).
+`--point` restores single-pick projections.
 
 Housekeeping: `mm set-self`, `mm flag-liv "Rahm, Jon"`, `mm journal --add "..."`,
 `mm set-field-type "bmw" playoff50`.
