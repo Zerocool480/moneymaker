@@ -17,7 +17,7 @@
     <div class="hero-money mono gold-under">{{ cushion[0]|money_signed|money_od|safe }}</div>
     <div class="hero-sub mono">
       {{ "over" if cushion[0] >= 0 else "to" }} {{ cushion[1] }}{{ {1:"st",2:"nd",3:"rd"}.get(cushion[1], "th") }} ({{ cushion[2] }})
-      {% if up_gap %} · {{ (-up_gap[0])|money_signed }} to {{ up_gap[1] }}{{ {1:"st",2:"nd",3:"rd"}.get(up_gap[1], "th") }} ({{ up_gap[2] }}){% endif %}
+      {% if up_gap %} · {{ up_gap[0]|money_signed }} to {{ up_gap[1] }}{{ {1:"st",2:"nd",3:"rd"}.get(up_gap[1], "th") }} ({{ up_gap[2] }}){% endif %}
     </div>
   </div>
   {% elif not has_line %}
@@ -52,7 +52,7 @@
   <div class="strip-overlay">
     <span class="strip-you mono" style="left: {{ strip.you_x }}%">YOU · {{ (standings[self_rank - 1].total)|money_short }}</span>
     {% if strip.line_x is not none %}
-    <span class="strip-tab" style="left: {{ strip.line_x }}%">MONEY LINE</span>
+    <span class="strip-tab" style="left: {{ strip.line_x }}%">MONEY LINE · TOP {{ paid }} PAID</span>
     {% endif %}
     <span class="strip-end lo mono">{{ strip.lo|money_short }}</span>
     <span class="strip-end hi mono">{{ strip.hi|money_short }}</span>
@@ -74,7 +74,7 @@
     {% if standings %}
     <table class="data tower">
       <thead><tr><th>#</th><th>Δ</th><th>Manager</th><th class="num">Total</th>
-        <th class="num">Gap</th><th class="num">Int</th><th>Ladder</th><th></th></tr></thead>
+        <th class="num">Gap</th><th class="num">To next</th><th>Ladder</th><th></th></tr></thead>
       <tbody>
         {% for r in standings %}
         <tr class="{{ 'self-row' if r.is_self }}" {% if r.is_self %}id="self-row"{% endif %}>
@@ -103,6 +103,7 @@
         {% endfor %}
       </tbody>
     </table>
+    <p class="meta mono">gap = to the money line · to next = seat above · ladder full bar = $2M, arrows beyond</p>
     {% else %}<p class="empty">no standings snapshot on this board yet</p>{% endif %}
   </div>
 
@@ -119,7 +120,7 @@
         <rect x="0" y="{{ spark.band_top }}" width="100" height="{{ spark.band_bot - spark.band_top }}" class="band-top6"/>
         <path d="{{ spark.rank_d }}" class="spark-self"/>
       </svg>
-      <div class="spark-caption mono">rank by week — now <b>{{ spark.end_rank }}{{ {1:"st",2:"nd",3:"rd"}.get(spark.end_rank, "th") }}</b> <span class="dim">gold band = paid</span></div>
+      <div class="spark-caption mono">rank by week — now <b>{{ spark.end_rank }}{{ {1:"st",2:"nd",3:"rd"}.get(spark.end_rank, "th") }}</b> <span class="dim">· gold band = paid</span></div>
     </div>
     {% endif %}
 
@@ -147,7 +148,7 @@
       <div class="next-name">{{ next_event.name|ev_name|upper }}</div>
       <div class="meta mono">{{ next_event.purse|money_short }} purse · {{ "no cut" if not next_event.has_cut else "cut" }}{% if next_event.picks_per_manager == 2 %} · <span class="chip chip-major">MAJOR ×2</span>{% endif %}</div>
       <div class="next-pick">
-        {% if my_next_pick %}<span class="chip chip-locked">🔒 {{ my_next_pick }}</span>
+        {% if my_next_pick %}<span class="chip chip-locked"><svg viewBox="0 0 10 12" class="lock-ic" aria-hidden="true"><path d="M2 5V3.5a3 3 0 0 1 6 0V5h.5a1 1 0 0 1 1 1v4.5a1 1 0 0 1-1 1h-7a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1H2zm1.4 0h3.2V3.5a1.6 1.6 0 0 0-3.2 0V5z" fill="currentColor"/></svg> {{ my_next_pick }}</span>
         {% else %}<span class="chip chip-warn">⚠ NOT PICKED</span> <a href="/pick?event={{ next_event.name|ev_name|urlencode }}">open the desk →</a>{% endif %}
       </div>
     </div>

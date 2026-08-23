@@ -8,6 +8,7 @@ shapes context dicts and chart geometry for the Jinja templates.
 import datetime
 import io
 import os
+import re
 import time
 
 import numpy as np
@@ -61,14 +62,14 @@ def _money_short(v):
 
 
 def _money_od(v):
-    """Odometer: leading magnitude group dimmed. Heroes/tiles only.
+    """Odometer: sign + currency dimmed, every digit full ink. Heroes only.
     Accepts a number or an already-formatted money string."""
     s = v if isinstance(v, str) else _money(v)
-    if "," not in s:
+    m = re.match(r"^([+\-−]?\$)(.+)$", s)
+    if not m:
         return f'<span class="od">{s}</span>'
-    head, tail = s.split(",", 1)
-    return (f'<span class="od"><span class="od-dim">{head},</span>'
-            f'{tail}</span>')
+    return (f'<span class="od"><span class="od-dim">{m.group(1)}</span>'
+            f'{m.group(2)}</span>')
 
 
 def _p_label(p, decimals=1):
@@ -267,10 +268,11 @@ def create_app(db: str | None = None, season: int | None = None) -> FastAPI:
         # money strip geometry (full-bleed: positions in %, text in HTML)
         strip = None
         if len(totals) >= 8 and self_name in standings:
-            lo = np.percentile(totals, 8)
+            lo = float(min(totals))
             hi = max(totals)
             span = (hi - lo) or 1.0
-            xp = lambda v: max(0.0, min(100.0, 100 * (v - lo) / span))
+            # 1..99 inset so the endpoint ticks render whole
+            xp = lambda v: 1.0 + max(0.0, min(98.0, 98 * (v - lo) / span))
             strip = {
                 "ticks": [{"x": xp(v), "cls": ("you" if m == self_name else
                                                "paid" if i < paid else "field"),
@@ -588,10 +590,10 @@ def create_app(db: str | None = None, season: int | None = None) -> FastAPI:
                 (out_of_reach if p >= 0.99 else ahead).append(row)
             else:
                 (out_of_reach if p <= 0.01 else behind).append(row)
-        key_ = lambda r: (0 if abs(r["gap"]) < 1.2e6 else 1,
-                          abs(r["p_ahead"] - 0.5))
-        ahead.sort(key=key_)
-        behind.sort(key=key_)
+        # order by the number each pane prints: best catch chance first,
+        # biggest live threat first
+        ahead.sort(key=lambda r: r["p_ahead"])
+        behind.sort(key=lambda r: -r["p_ahead"])
         dist_rows = [{"k": k, "p": v} for k, v in res["dist"].items()
                      if k <= 12]
         tail = float(sum(v for k, v in res["dist"].items() if k > 12))
@@ -692,7 +694,12 @@ def create_app(db: str | None = None, season: int | None = None) -> FastAPI:
             from ..datagolf import DataGolfAPI
             try:
                 ls = DataGolfAPI().live_stats()
-                asof = str(ls["last_updated"].iloc[0])[:16]
+                try:
+                    asof = pd.to_datetime(
+                        str(ls["last_updated"].iloc[0])
+                    ).strftime("%b %d · %H:%M UTC")
+                except (ValueError, TypeError):
+                    asof = str(ls["last_updated"].iloc[0])[:16]
             except RuntimeError as e:
                 return templates.TemplateResponse(
                     request, "partials/ghost.html",
@@ -777,7 +784,7 @@ def create_app(db: str | None = None, season: int | None = None) -> FastAPI:
             rivals_exp = {m: float(totals[m].mean()) for m in totals
                           if m != self_name}
             cols, band = [], []
-            top_show = min(len(players), 30)
+            top_show = min(len(players), 40)
             for f in range(1, top_show + 1):
                 pf = float((my_fin == f).mean())
                 total_f = self_start + \
@@ -785,9 +792,23 @@ def create_app(db: str | None = None, season: int | None = None) -> FastAPI:
                     (lad[f - 1] if f <= len(lad) else 0.0)
                 rank_f = 1 + sum(1 for v in rivals_exp.values()
                                  if v > total_f)
-                cols.append({"f": f, "p": pf})
+                cols.append({"f": f, "p": pf, "tail": False})
                 if rank_f <= paid:
                     band.append(f)
+            if top_show < len(players):
+                # terminal bin so the tail mass is on the chart, not implied
+                p_tail = float((my_fin > top_show).mean())
+                if p_tail > 0.0005:
+                    worst = len(players)
+                    total_w = self_start + \
+                        sum(h["proj"] for h in holdings if h["key"] != pk) + \
+                        (lad[worst - 1] if worst <= len(lad) else 0.0)
+                    rank_w = 1 + sum(1 for v in rivals_exp.values()
+                                     if v > total_w)
+                    cols.append({"f": top_show + 1, "p": p_tail,
+                                 "tail": True})
+                    if rank_w <= paid and band and max(band) == top_show:
+                        band.append(top_show + 1)
             markers = []
             for m, v in sorted(standings.items(), key=lambda kv: -kv[1]):
                 if m == self_name or v <= self_start:
@@ -984,7 +1005,7 @@ def create_app(db: str | None = None, season: int | None = None) -> FastAPI:
         if lg["cum"] is not None and self_name in lg["cum"].columns:
             cum = lg["cum"]
             paid = opp.OVERALL_PAID
-            xs = np.linspace(40, 1180, len(cum))
+            xs = np.linspace(40, 1080, len(cum))
             top = float(cum.max().max()) or 1.0
             yp = lambda v: 290 - 260 * (v / top)
             sixth = cum.apply(lambda r: r.nlargest(min(paid, len(r))).iloc[-1],

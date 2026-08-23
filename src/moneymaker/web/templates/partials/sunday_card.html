@@ -1,14 +1,19 @@
 {% from "partials/money_line.html" import money_line %}
 <section class="sweat-hero">
-  <div class="sweat-statement">RIGHT NOW YOU FINISH
-    <span class="sweat-rank">{{ now_rank }}{{ {1:"ST",2:"ND",3:"RD"}.get(now_rank, "TH") }}</span>
-    {% if now_prize %}<span class="chip chip-payout">${{ "{:,}".format(now_prize) }}</span>{% endif %}
+  <div class="sweat-lead">
+    <div class="sweat-statement">RIGHT NOW YOU FINISH
+      <span class="sweat-rank">{{ now_rank }}{{ {1:"ST",2:"ND",3:"RD"}.get(now_rank, "TH") }}</span>
+      {% if now_prize %}<span class="chip chip-payout">${{ "{:,}".format(now_prize) }}</span>{% endif %}
+    </div>
+    <div class="sweat-numbers mono">
+      <span>E[finish] {{ exp_rank|round(1) }}</span>
+      <span>E[league $] ${{ e_prize|round(0)|int }}</span>
+      {% if asof %}<span class="dim">positions as of {{ asof }}</span>{% endif %}
+    </div>
   </div>
-  <div class="sweat-numbers mono">
-    <span class="sweat-p">P(money) <b>{{ p_money|pct }}</b> <span class="whisker">±{{ (100 * p_money_w)|round(1) }}</span></span>
-    <span>E[finish] {{ exp_rank|round(1) }}</span>
-    <span>E[league $] ${{ e_prize|round(0)|int }}</span>
-    {% if asof %}<span class="dim">positions as of {{ asof }}</span>{% endif %}
+  <div class="sweat-pblock">
+    <div class="tile-label">HOLD THE MONEY TONIGHT</div>
+    <div class="sweat-pbig mono">{{ p_money|pct }} <span class="whisker">±{{ (100 * p_money_w)|round(1) }}</span></div>
   </div>
 </section>
 
@@ -37,18 +42,26 @@
     {% set n_cols = sweat.cols|length %}
     {% set cw = (1060 / n_cols)|round(1) %}
     {% set band_total = sweat.band_lo == 1 and sweat.band_hi == n_cols %}
-    {% if sweat.band_lo and not band_total %}
+    {% if sweat.band_lo %}
     <rect x="{{ 20 + (sweat.band_lo - 1) * cw }}" y="8"
           width="{{ (sweat.band_hi - sweat.band_lo + 1) * cw }}" height="172"
           class="zone-paid-svg zone-strong"/>
+    {% endif %}
+    {% if band_total %}
+    <text x="30" y="26" class="svg-flag" text-anchor="start">SAFE AT ANY FINISH</text>
     {% endif %}
     {% for c in sweat.cols %}
     {% set h = (150 * c.p / sweat.maxp)|round(1) %}
     <rect x="{{ 22 + (c.f - 1) * cw }}" y="{{ 180 - h }}" width="{{ cw - 3 }}" height="{{ h }}"
           rx="2" class="dist-col col" data-finish="{{ c.f }}">
-      <title>finish {{ c.f }} — {{ c.p|pct }}</title>
+      <title>finish {{ c.f }}{{ "+" if c.tail }} — {{ c.p|pct }}</title>
     </rect>
-    {% if c.f is divisibleby 5 or c.f == 1 %}
+    {% if c.p == sweat.maxp %}
+    <text x="{{ 22 + (c.f - 1) * cw + (cw - 3) / 2 }}" y="{{ 172 - h }}" class="svg-value" text-anchor="middle">{{ c.p|pct0 }}</text>
+    {% endif %}
+    {% if c.tail %}
+    <text x="{{ 22 + (c.f - 1) * cw + (cw - 3) / 2 }}" y="196" class="svg-label" text-anchor="middle">{{ c.f }}+</text>
+    {% elif c.f is divisibleby 5 or c.f == 1 %}
     <text x="{{ 22 + (c.f - 1) * cw + (cw - 3) / 2 }}" y="196" class="svg-label" text-anchor="middle">{{ c.f }}</text>
     {% endif %}
     {% endfor %}
@@ -64,7 +77,8 @@
   </div>
   <div class="tooltip mono" id="sweat-tip" hidden></div>
   {{ money_line(paid, sweat.golfer.split(" ")[-1]|upper ~ " can't lose it alone tonight — the sweat is on the DEFENSE board" if band_total
-                else "gold band = finishes that keep you in the money") }}
+                else "gold band = finishes that keep you in the money",
+                tab="LEAGUE MONEY LINE · TOP " ~ paid ~ " OVERALL PAID") }}
 </section>
 {% endif %}
 
@@ -77,7 +91,7 @@
         <span class="rival-verdict">PASS {{ a.manager.split(" ")[0]|upper }} — needs {{ a.needs }}{% if a.pays %} ({{ a.pays|money_short }}){% endif %}</span>
         <span class="rival-p mono">{{ a.p|pct }}</span>
       </div>
-      <div class="meter"><span class="meter-fill" style="width: {{ (100 * a.p)|round(1) }}%"></span></div>
+      <div class="meter"><span class="meter-fill neutral" style="width: {{ (100 * a.p)|round(1) }}%"></span></div>
       <div class="meta mono">gap {{ a.gap|money }} · they hold
         {% for g, tp in a.golfers %}{{ g }}{% if tp is not none %} ({{ tp if tp < 0 else "+" ~ tp }}){% endif %}{{ ", " if not loop.last }}{% endfor %}</div>
     </div>

@@ -17,7 +17,7 @@
 <p class="meta mono">{{ events|join(" · ") }} — n={{ "{:,}".format(n) }} — {{ "point projections" if point else "rival picks sampled from the fitted choice model" }}</p>
 
 <section class="cols">
-  <div class="card">
+  <div class="card sticky-pane">
     <div class="card-head"><h3>FINISH DISTRIBUTION</h3>
       <span class="meta mono">in the money {{ p_money|pct }}</span></div>
     <div class="chart-scroll">
@@ -31,7 +31,7 @@
         <title>{{ d.k }}{{ {1:"st",2:"nd",3:"rd"}.get(d.k, "th") }} — {{ d.p|pct }}</title>
       </rect>
       <text x="{{ 35 + (d.k - 1) * 42 }}" y="192" class="svg-label" text-anchor="middle">{{ d.k }}</text>
-      {% if d.p == maxp or d.k == paid or d.k == paid + 1 %}
+      {% if d.p >= 0.03 or d.k == paid or d.k == paid + 1 %}
       <text x="{{ 35 + (d.k - 1) * 42 }}" y="{{ 170 - h }}" class="svg-value" text-anchor="middle">{{ d.p|pct0 }}</text>
       {% endif %}
       {% endfor %}
@@ -46,14 +46,14 @@
 
   <div class="card grow">
     <div class="card-head"><h3>THE CATCH LIST</h3></div>
-    <h4 class="pane-head">AHEAD — can you catch them?</h4>
+    <h4 class="pane-head">AHEAD — can you catch them? <span class="pane-key mono">P(you pass)</span></h4>
     <table class="data catch">
       <tbody>
       {% for t in ahead %}
         <tr class="{{ 'edge-gold' if t.straddle }}">
           <td>{{ t.manager }}
             {% for g in t.golfers %}<span class="chip {{ 'chip-corr' if t.shared }}">{{ g }}</span>{% endfor %}</td>
-          <td class="num mono">{{ t.p_ahead|pct }}</td>
+          <td class="num mono">{{ (1 - t.p_ahead)|pct }}</td>
           <td class="gapax">
             <span class="gapax-track"><span class="gapax-zero"></span>
               <span class="gapax-bar {{ 'pos' if t.gap > 0 else 'neg' }}" style="width: {{ (46 * t.gap_pct|abs)|round(1) }}%"></span></span>
@@ -66,7 +66,7 @@
       {% endfor %}
       </tbody>
     </table>
-    <h4 class="pane-head">BEHIND — can they catch you?</h4>
+    <h4 class="pane-head">BEHIND — can they catch you? <span class="pane-key mono">P(they pass)</span></h4>
     <table class="data catch">
       <tbody>
       {% for t in behind %}
@@ -80,6 +80,7 @@
           </td>
           <td class="num mono dim">{{ t.gap|money_signed }}</td>
         </tr>
+        <tr class="sentence-row"><td colspan="4" class="sentence mono">{{ t.manager.split(" ")[0] }} passes you in {{ (100 * t.p_ahead)|round(0)|int }}% of Sundays</td></tr>
       {% else %}
         <tr><td class="empty">nobody within reach behind you</td></tr>
       {% endfor %}

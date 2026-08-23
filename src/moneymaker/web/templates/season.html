@@ -9,7 +9,7 @@
 
 {% if hoard %}
 <section class="card">
-  <div class="card-head"><h3>THE HOARD — best names still unused</h3></div>
+  <div class="card-head"><h3>THE HOARD</h3><span class="meta">best names still unused</span></div>
   <div class="hoard-strip">
     {% for h in hoard %}<span class="chip">{{ h }}</span>{% endfor %}
   </div>
@@ -27,8 +27,8 @@
         {% if ns.seg is not none and segs.get(ns.seg) %}
         {% set s = segs[ns.seg] %}
         <tr class="trophy-row"><td colspan="8">
-          SEGMENT {{ ns.seg }} — {{ s.total|money }}
-          {% if s.rank %} · finished {{ s.rank }}{{ {1:"st",2:"nd",3:"rd"}.get(s.rank, "th") }}{% endif %}
+          SEGMENT {{ ns.seg }} — <span class="mono">{{ s.total|money }}</span>
+          {% if s.rank %} · finished <span class="mono">{{ s.rank }}{{ {1:"st",2:"nd",3:"rd"}.get(s.rank, "th") }}</span>{% endif %}
           {% if s.paid %} <span class="chip chip-payout">paid ${{ s.paid }}</span>{% endif %}
         </td></tr>
         {% endif %}
@@ -40,9 +40,8 @@
         <td>{{ e.name|ev_name }}{% if e.picks_per_manager == 2 %} <span class="chip chip-major">MAJOR ×2</span>{% endif %}</td>
         <td class="num mono">{{ e.purse|money_short }}</td>
         <td class="dim">{{ "strong" if e.strong else "open" }}</td>
-        <td>{% if e.status == "locked" %}<span class="chip chip-locked">🔒</span>
-            {% elif e.status == "next" %}<span class="chip chip-next">NEXT UP</span>{% endif %}</td>
-        <td>{{ e.pick or "—" }}</td>
+        <td>{% if e.status == "next" %}<span class="chip chip-next">NEXT UP</span>{% endif %}</td>
+        <td>{% if e.status == "locked" and e.pick %}<span class="chip chip-locked"><svg viewBox="0 0 10 12" class="lock-ic" aria-label="locked"><path d="M2 5V3.5a3 3 0 0 1 6 0V5h.5a1 1 0 0 1 1 1v4.5a1 1 0 0 1-1 1h-7a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1H2zm1.4 0h3.2V3.5a1.6 1.6 0 0 0-3.2 0V5z" fill="currentColor"/></svg> LOCKED</span> {% endif %}{{ e.pick or "—" }}</td>
         <td class="num mono earn-cell">
           {% if e.earned is not none %}
           <span class="earn-bar" style="width: {{ (64 * e.earn_pct)|round(1) }}px"></span>
@@ -55,8 +54,8 @@
     {% if ns.seg is not none and segs.get(ns.seg) %}
     {% set s = segs[ns.seg] %}
     <tr class="trophy-row"><td colspan="8">
-      SEGMENT {{ ns.seg }} — {{ s.total|money }}
-      {% if s.rank %} · {{ "finished" if s.done else "running" }} {{ s.rank }}{{ {1:"st",2:"nd",3:"rd"}.get(s.rank, "th") }}{% endif %}
+      SEGMENT {{ ns.seg }} — <span class="mono">{{ s.total|money }}</span>
+      {% if s.rank %} · {{ "finished" if s.done else "running" }} <span class="mono">{{ s.rank }}{{ {1:"st",2:"nd",3:"rd"}.get(s.rank, "th") }}</span>{% endif %}
       {% if s.paid %} <span class="chip chip-payout">paid ${{ s.paid }}</span>{% endif %}
     </td></tr>
     {% endif %}

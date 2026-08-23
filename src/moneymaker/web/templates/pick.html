@@ -14,7 +14,7 @@
   <div class="trap-ritual mono">
     <span class="chip {{ 'chip-ok' if n_amateurs == 0 else 'chip-warn' }}">{{ "no amateurs in field" if n_amateurs == 0 else n_amateurs ~ " amateur" ~ ("s" if n_amateurs > 1) ~ " flagged $0" }}</span>
     <span class="chip chip-ok">{{ inel_count }} ineligible filtered</span>
-    {% if my_locked %}<span class="chip chip-locked">🔒 locked ({{ my_locked|length }}/{{ event_row.picks_per_manager }})</span>{% endif %}
+    {% if my_locked %}<span class="chip chip-locked"><svg viewBox="0 0 10 12" class="lock-ic" aria-hidden="true"><path d="M2 5V3.5a3 3 0 0 1 6 0V5h.5a1 1 0 0 1 1 1v4.5a1 1 0 0 1-1 1h-7a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1H2zm1.4 0h3.2V3.5a1.6 1.6 0 0 0-3.2 0V5z" fill="currentColor"/></svg> locked ({{ my_locked|length }}/{{ event_row.picks_per_manager }})</span>{% endif %}
   </div>
   <form method="get" action="/pick" class="inline-form"
         hx-get="/pick" hx-target="#board-wrap" hx-select="#board" hx-push-url="true">
