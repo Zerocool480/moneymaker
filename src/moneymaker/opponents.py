@@ -51,12 +51,36 @@ REACH = 0.11                         # ~runner-up share of remaining purse
 
 def money_gap(standings: dict, mgr: str, paid: int) -> float | None:
     """Dollars to the LAST paid position (<=0 means in the money by that
-    cushion). None when the manager or the board is unknown."""
+    cushion). None when the manager or the board is unknown.
+    NOTE: this is the POSTURE quantity (how far from contention). For the
+    user-facing "cushion above the line", use money_cushion — being passed
+    by another paid manager costs nothing; the line that matters is the
+    first UNPAID seat."""
     if not standings or mgr not in standings:
         return None
     totals = sorted(standings.values(), reverse=True)
     line = totals[min(paid, len(totals)) - 1]
     return line - standings[mgr]
+
+
+def money_cushion(standings: dict, mgr: str, paid: int):
+    """(cushion_dollars, ref_rank, ref_name) — the DISPLAY semantics of the
+    money line. In the money: cushion (>0) over the first UNPAID seat
+    (rank paid+1), named. Out of the money: deficit (<0) to the LAST PAID
+    seat, named. None when unknowable."""
+    if not standings or mgr not in standings:
+        return None
+    ranked = sorted(standings.items(), key=lambda kv: -kv[1])
+    names = [m for m, _ in ranked]
+    my_rank = names.index(mgr) + 1
+    if my_rank <= paid:
+        ref_idx = paid            # first unpaid seat (0-based index paid)
+        if ref_idx >= len(ranked):
+            return (standings[mgr], my_rank, None)   # everyone is paid
+    else:
+        ref_idx = paid - 1        # last paid seat
+    ref_name, ref_total = ranked[ref_idx]
+    return (standings[mgr] - ref_total, ref_idx + 1, ref_name)
 
 
 def posture_for(mgr: str, overall: dict, segment: dict,

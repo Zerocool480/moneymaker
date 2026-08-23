@@ -1,0 +1,42 @@
+<table class="data board-table" id="board">
+  <thead><tr>
+    <th>#</th><th class="cmp-th">☐</th><th>Golfer</th>
+    <th class="num">Win</th><th class="num">Top 5</th>
+    {% if event_row.has_cut %}<th class="num">Cut</th>{% endif %}
+    <th class="num">EV</th>
+    <th class="evbar-th">EV bar · scale {{ max_ev|money_short }}</th>
+    <th class="num">League%</th>
+    {% if posture != "neutral" %}<th class="num">Δ {{ posture }}</th>{% endif %}
+    <th></th>
+  </tr></thead>
+  <tbody>
+  {% for r in board_rows %}
+    <tr class="clickable pick-row {{ 'flagged' if r.flags }}" tabindex="0"
+        data-key="{{ r.key }}"
+        hx-get="/pick/why?event={{ event_row.name|ev_name|urlencode }}&key={{ r.key|urlencode }}"
+        hx-target="#why-panel" hx-swap="innerHTML transition:true"
+        hx-trigger="click, keyup[key=='Enter']">
+      <td class="mono">{{ loop.index }}</td>
+      <td class="cmp-td"><input type="checkbox" class="cmp" value="{{ r.key }}"
+          aria-label="compare {{ r.display_name }}" onclick="event.stopPropagation()"></td>
+      <td>{{ r.display_name }}
+        {% for m in r.locked_line %}<span class="chip chip-corr" title="gap frozen — {{ m }} holds him">{{ m.split(" ")[0] }}</span>{% endfor %}
+        {% if r.flags %}<span class="chip chip-flag">⚠ {{ r.flags }}</span>{% endif %}
+      </td>
+      <td class="num mono">{{ r.win|pct }}</td>
+      <td class="num mono">{{ r.top_5|pct }}</td>
+      {% if event_row.has_cut %}<td class="num mono">{{ r.make_cut|pct0 }}</td>{% endif %}
+      <td class="num mono strong">{{ r.exp|money_short }}</td>
+      <td class="evbar-td">
+        <span class="evbar-track">
+          <span class="evbar-fill" style="width: {{ r.ev_pct|round(1) }}%"></span>
+          <span class="evbar-floor" style="left: {{ r.floor_pct|round(1) }}%"></span>
+        </span>
+      </td>
+      <td class="num mono dim">{{ r.league_use|pct0 }}{% if r.leverage %} <span class="chip chip-lev">LEV</span>{% endif %}</td>
+      {% if posture != "neutral" %}<td class="num mono dim">{{ r.delta_score|money_short }}</td>{% endif %}
+      <td class="chev">›</td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>

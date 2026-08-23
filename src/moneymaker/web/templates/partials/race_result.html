@@ -1,61 +1,102 @@
+{% from "partials/money_line.html" import money_line %}
 <section class="tiles">
-  <div class="tile hero">
+  <div class="tile hero-tile">
+    <div class="tile-label">P(in the money)</div>
+    <div class="tile-value mono count-up">{{ p_money|pct }} <span class="whisker">±{{ (100 * p_money_w)|round(1) }}</span></div>
+    {% if d_money is not none and d_money|abs > 0.001 %}<div class="mv {{ 'up' if d_money > 0 else 'dn' }}">{{ "▲" if d_money > 0 else "▼" }}{{ (100 * d_money|abs)|round(1) }} vs last run</div>{% endif %}
+  </div>
+  <div class="tile">
+    <div class="tile-label">Expected league prize</div>
+    <div class="tile-value mono count-up">≈ ${{ e_prize|round(0)|int }}</div>
+  </div>
+  <div class="tile">
     <div class="tile-label">P(1st)</div>
-    <div class="tile-value">{{ res.p_first|pct }}</div>
-  </div>
-  <div class="tile">
-    <div class="tile-label">P(top 3)</div>
-    <div class="tile-value">{{ res.p_top3|pct }}</div>
-  </div>
-  <div class="tile">
-    <div class="tile-label">P(top 6)</div>
-    <div class="tile-value">{{ res.p_top6|pct }}</div>
+    <div class="tile-value mono {{ 'dim' if p_first < 0.005 }}">{% if p_first < 0.005 and p_first > 0 %}no realistic path to 1st{% else %}{{ p_first|p_label }}{% endif %}</div>
   </div>
 </section>
-<p class="meta">{{ events|join(" · ") }} — n={{ "{:,}".format(n) }} — {{ note }}</p>
+<p class="meta mono">{{ events|join(" · ") }} — n={{ "{:,}".format(n) }} — {{ "point projections" if point else "rival picks sampled from the fitted choice model" }}</p>
 
 <section class="cols">
   <div class="card">
-    <div class="card-head"><h3>Finish distribution</h3></div>
-    <div class="barlist" role="img" aria-label="Probability of each finishing position">
+    <div class="card-head"><h3>FINISH DISTRIBUTION</h3>
+      <span class="meta mono">in the money {{ p_money|pct }}</span></div>
+    <div class="chart-scroll">
+    <svg viewBox="0 0 560 210" class="dist-chart" preserveAspectRatio="xMidYMid meet">
+      {% set paid_w = paid * 42 %}
+      <rect x="14" y="10" width="{{ paid_w }}" height="166" class="zone-paid-svg"/>
       {% for d in dist %}
-      <div class="barlist-row" title="Finish {{ d.k }}: {{ d.p|pct }}">
-        <span class="barlist-label">{{ d.k }}{{ {1:"st",2:"nd",3:"rd"}.get(d.k, "th") }}</span>
-        <span class="barlist-track"><span class="barlist-fill" style="width: {{ (100 * d.p / maxp)|round(1) }}%"></span></span>
-        <span class="barlist-value">{{ d.p|pct }}</span>
-      </div>
+      {% set h = (150 * d.p / maxp)|round(1) %}
+      <rect x="{{ 18 + (d.k - 1) * 42 }}" y="{{ 176 - h }}" width="34" height="{{ h }}"
+            rx="3" class="dist-col {{ 'in-money' if d.k <= paid }}">
+        <title>{{ d.k }}{{ {1:"st",2:"nd",3:"rd"}.get(d.k, "th") }} — {{ d.p|pct }}</title>
+      </rect>
+      <text x="{{ 35 + (d.k - 1) * 42 }}" y="192" class="svg-label" text-anchor="middle">{{ d.k }}</text>
+      {% if d.p == maxp or d.k == paid or d.k == paid + 1 %}
+      <text x="{{ 35 + (d.k - 1) * 42 }}" y="{{ 170 - h }}" class="svg-value" text-anchor="middle">{{ d.p|pct0 }}</text>
+      {% endif %}
       {% endfor %}
+      {% if tail > 0.002 %}
+      <text x="546" y="192" class="svg-label" text-anchor="end">13th+ {{ tail|pct0 }}</text>
+      {% endif %}
+      <line x1="{{ 14 + paid_w }}" x2="{{ 14 + paid_w }}" y1="6" y2="182" class="svg-goldline"/>
+    </svg>
     </div>
+    {{ money_line(paid, "in the money " ~ (p_money|pct)) }}
   </div>
 
   <div class="card grow">
-    <div class="card-head"><h3>Threats — P(finishes ahead of you)</h3></div>
-    <table class="data">
-      <thead><tr><th>Manager</th><th class="num">P(ahead)</th><th></th>
-        <th class="num">Gap now</th><th class="num">Sim EV added</th></tr></thead>
+    <div class="card-head"><h3>THE CATCH LIST</h3></div>
+    <h4 class="pane-head">AHEAD — can you catch them?</h4>
+    <table class="data catch">
       <tbody>
-      {% for t in threats %}
-        <tr>
-          <td>{{ t.manager }}</td>
-          <td class="num">{{ t.p|pct }}</td>
-          <td class="cell-bar"><span class="cell-fill" style="width: {{ (60 * t.p)|round(1) }}px" title="{{ t.p|pct }}"></span></td>
-          <td class="num">{{ t.gap|money }}</td>
-          <td class="num">{{ t.ev|money }}</td>
+      {% for t in ahead %}
+        <tr class="{{ 'edge-gold' if t.straddle }}">
+          <td>{{ t.manager }}
+            {% for g in t.golfers %}<span class="chip {{ 'chip-corr' if t.shared }}">{{ g }}</span>{% endfor %}</td>
+          <td class="num mono">{{ t.p_ahead|pct }}</td>
+          <td class="gapax">
+            <span class="gapax-track"><span class="gapax-zero"></span>
+              <span class="gapax-bar {{ 'pos' if t.gap > 0 else 'neg' }}" style="width: {{ (46 * t.gap_pct|abs)|round(1) }}%"></span></span>
+          </td>
+          <td class="num mono dim">{{ t.gap|money_signed }}</td>
         </tr>
+        <tr class="sentence-row"><td colspan="4" class="sentence mono">you pass {{ t.manager.split(" ")[0] }} in {{ (100 * (1 - t.p_ahead))|round(0)|int }}% of Sundays</td></tr>
+      {% else %}
+        <tr><td class="empty">nobody catchable ahead — clear track</td></tr>
       {% endfor %}
       </tbody>
     </table>
+    <h4 class="pane-head">BEHIND — can they catch you?</h4>
+    <table class="data catch">
+      <tbody>
+      {% for t in behind %}
+        <tr class="{{ 'edge-gold' if t.straddle }}">
+          <td>{{ t.manager }}
+            {% for g in t.golfers %}<span class="chip {{ 'chip-corr' if t.shared }}">{{ g }}</span>{% endfor %}</td>
+          <td class="num mono">{{ t.p_ahead|pct }}</td>
+          <td class="gapax">
+            <span class="gapax-track"><span class="gapax-zero"></span>
+              <span class="gapax-bar neg" style="width: {{ (46 * t.gap_pct|abs)|round(1) }}%"></span></span>
+          </td>
+          <td class="num mono dim">{{ t.gap|money_signed }}</td>
+        </tr>
+      {% else %}
+        <tr><td class="empty">nobody within reach behind you</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    {% if n_out %}<p class="meta">out of reach: {{ out_names }}{% if n_out > 3 %} +{{ n_out - 3 }} more{% endif %}</p>{% endif %}
   </div>
 </section>
 
 {% if band %}
 <section class="card">
-  <div class="card-head"><h3>Sensitivity band</h3></div>
-  <p class="meta">Key rival: {{ band.rival }} — metric range {{ band.lo|pct }} – {{ band.hi|pct }}</p>
+  <div class="card-head"><h3>SENSITIVITY BAND</h3>
+    <span class="meta mono">key rival {{ band.rival }} — {{ band.lo|pct }} to {{ band.hi|pct }}</span></div>
   <table class="data narrow">
     <tbody>
     {% for name, v in band.rows %}
-      <tr><td>{{ name|replace("_"," ") }}</td><td class="num">{{ v|pct }}</td></tr>
+      <tr><td>{{ name|replace("_", " ") }}</td><td class="num mono">{{ v|pct }}</td></tr>
     {% endfor %}
     </tbody>
   </table>

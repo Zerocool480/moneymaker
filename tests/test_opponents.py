@@ -63,6 +63,21 @@ def test_no_dead_hoard_while_a_major_remains(db_mid):
     assert all(p.dead_hoard == () for p in profs.values())
 
 
+def test_money_cushion_uses_first_unpaid_seat():
+    # The 2026 dashboard bug the design critics caught: Jay 5th of 86,
+    # cushion must be measured to 7th (first unpaid), NOT 6th (still paid).
+    st = {"Snyder": 18_544_802, "Rappaport": 15_314_887, "Livote": 14_283_254,
+          "LeMaire": 14_171_479, "Jay": 13_694_339, "Aadal": 13_016_747,
+          "White": 12_637_620, "Santana": 12_626_827}
+    cushion, ref_rank, ref_name = opp.money_cushion(st, "Jay", 6)
+    assert cushion == 13_694_339 - 12_637_620 == 1_056_719
+    assert (ref_rank, ref_name) == (7, "White")
+    # out of the money: deficit to the LAST paid seat
+    cushion, ref_rank, ref_name = opp.money_cushion(st, "White", 6)
+    assert cushion == 12_637_620 - 13_016_747
+    assert (ref_rank, ref_name) == (6, "Aadal")
+
+
 def test_posture_classification():
     overall = {"A": 5_000_000, "B": 4_000_000, "C": 3_900_000, "D": 3_800_000,
                "E": 3_700_000, "F": 3_600_000, "G": 3_100_000, "H": 500_000}

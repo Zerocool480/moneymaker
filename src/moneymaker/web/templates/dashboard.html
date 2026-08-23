@@ -1,69 +1,157 @@
 {% extends "base.html" %}
+{% from "partials/money_line.html" import money_line %}
 {% block content %}
-<section class="tiles">
-  <div class="tile">
-    <div class="tile-label">Your rank · {{ board }}</div>
-    <div class="tile-value">{{ self_rank if self_rank else "—" }}<span class="tile-sub">/ {{ n_managers }}</span></div>
+
+<section class="masthead">
+  <div class="hero-cell">
+    <div class="hero-label">Overall standing</div>
+    <div class="hero-row">
+      <span class="hero-rank">{{ self_rank }}{{ {1:"ST",2:"ND",3:"RD"}.get(self_rank, "TH") }}</span>
+      {% if self_delta %}<span class="mv {{ 'up' if self_delta > 0 else 'dn' }}">{{ "▲" if self_delta > 0 else "▼" }}{{ self_delta|abs }}</span>{% endif %}
+    </div>
+    <div class="hero-sub">OF {{ n_managers }} · {{ board|replace("segment", "SEGMENT ")|upper }}</div>
   </div>
-  <div class="tile">
-    <div class="tile-label">{% if gap_money is not none and gap_money <= 0 %}Cushion inside the money{% else %}Gap to the money (top {{ paid }}){% endif %}</div>
-    <div class="tile-value {{ 'good' if gap_money is not none and gap_money <= 0 }}">
-      {{ (gap_money if gap_money >= 0 else -gap_money)|money if gap_money is not none else "—" }}
+  {% if cushion and has_line %}
+  <div class="hero-cell hero-main">
+    <div class="hero-label">{{ "Above the money line" if cushion[0] >= 0 else "Below the money line" }}</div>
+    <div class="hero-money mono gold-under">{{ cushion[0]|money_signed|money_od|safe }}</div>
+    <div class="hero-sub mono">
+      {{ "over" if cushion[0] >= 0 else "to" }} {{ cushion[1] }}{{ {1:"st",2:"nd",3:"rd"}.get(cushion[1], "th") }} ({{ cushion[2] }})
+      {% if up_gap %} · {{ (-up_gap[0])|money_signed }} to {{ up_gap[1] }}{{ {1:"st",2:"nd",3:"rd"}.get(up_gap[1], "th") }} ({{ up_gap[2] }}){% endif %}
     </div>
   </div>
-  <div class="tile">
-    <div class="tile-label">Remaining events (with preds)</div>
-    <div class="tile-value">{{ remaining|length }}</div>
+  {% elif not has_line %}
+  <div class="hero-cell hero-main">
+    <div class="hero-label">Money line</div>
+    <div class="hero-money mono">all {{ n_managers }} inside top {{ paid }}</div>
+    <div class="hero-sub">field smaller than the paid places</div>
   </div>
-  <div class="tile">
-    <div class="tile-label">Purse still on the table</div>
-    <div class="tile-value">{{ pot_left|money }}</div>
+  {% endif %}
+  <div class="hero-cell hero-meta mono">
+    <div>{{ events_left }} event{{ "s" if events_left != 1 }} left</div>
+    {% if max_add %}<div>max add {{ max_add|money_short }} (winner)</div>{% endif %}
+    <div>{% if p_money is not none %}P(money) {{ p_money|pct0 }} ±{{ (100 * p_money_w)|round(1) }}{% else %}P(money) —{% endif %}</div>
   </div>
 </section>
 
+{% if strip %}
+<section class="strip-wrap">
+  <svg class="money-strip" preserveAspectRatio="none" viewBox="0 0 1000 64" aria-hidden="true">
+    <line x1="0" y1="46" x2="1000" y2="46" class="strip-axis"/>
+    {% for t in strip.ticks %}
+    <line x1="{{ 10 * t.x }}" x2="{{ 10 * t.x }}"
+          y1="{{ 28 if t.cls == 'you' else 33 if t.cls == 'paid' else 37 }}" y2="46"
+          class="strip-tick {{ t.cls }}"/>
+    <rect x="{{ 10 * t.x - 6 }}" y="20" width="12" height="30" class="hit"
+          data-tip="{{ t.mgr }} · {{ t.rank }}{{ {1:'st',2:'nd',3:'rd'}.get(t.rank, 'th') }} · {{ t.total|money }}{% if t.gap is not none %} · {{ t.gap|money_signed }} vs line{% endif %}"/>
+    {% endfor %}
+    {% if strip.line_x is not none %}
+    <line x1="{{ 10 * strip.line_x }}" x2="{{ 10 * strip.line_x }}" y1="8" y2="52" class="strip-line-gold"/>
+    {% endif %}
+  </svg>
+  <div class="strip-overlay">
+    <span class="strip-you mono" style="left: {{ strip.you_x }}%">YOU · {{ (standings[self_rank - 1].total)|money_short }}</span>
+    {% if strip.line_x is not none %}
+    <span class="strip-tab" style="left: {{ strip.line_x }}%">MONEY LINE</span>
+    {% endif %}
+    <span class="strip-end lo mono">{{ strip.lo|money_short }}</span>
+    <span class="strip-end hi mono">{{ strip.hi|money_short }}</span>
+  </div>
+  <div class="tooltip mono" id="strip-tip" hidden></div>
+</section>
+{% endif %}
+
 <section class="cols">
-  <div class="card grow">
+  <div class="card grow tower-card">
     <div class="card-head">
-      <h2>Standings</h2>
+      <h2>THE TOWER</h2>
       <div class="seg-tabs">
         {% for b in boards %}
-        <a class="seg-tab {{ 'active' if b == board }}" href="/?board={{ b }}">{{ b|replace("segment","Seg ")|title }}</a>
+        <a class="seg-tab {{ 'active' if b == board }}" href="/?board={{ b }}">{{ b|replace("segment","SEG ")|upper }}</a>
         {% endfor %}
       </div>
     </div>
     {% if standings %}
-    <table class="data">
-      <thead><tr><th>#</th><th>Manager</th><th class="num">Total</th></tr></thead>
+    <table class="data tower">
+      <thead><tr><th>#</th><th>Δ</th><th>Manager</th><th class="num">Total</th>
+        <th class="num">Gap</th><th class="num">Int</th><th>Ladder</th><th></th></tr></thead>
       <tbody>
         {% for r in standings %}
-        <tr class="{{ 'self-row' if r.is_self }} {{ 'money-row' if r.paid }} {{ 'money-edge' if r.rank == paid }}">
-          <td>{{ r.rank }}</td>
-          <td>{{ r.manager }}{% if r.is_self %} <span class="chip chip-self">you</span>{% endif %}
-              {% if r.paid %}<span class="chip chip-money">$</span>{% endif %}</td>
-          <td class="num">{{ r.total|money }}</td>
+        <tr class="{{ 'self-row' if r.is_self }}" {% if r.is_self %}id="self-row"{% endif %}>
+          <td class="mono">{{ r.rank }}</td>
+          <td class="mv-cell">{% if r.delta and r.delta > 0 %}<span class="mv up">▲{{ r.delta }}</span>{% elif r.delta and r.delta < 0 %}<span class="mv dn">▼{{ -r.delta }}</span>{% else %}<span class="mv flat">—</span>{% endif %}</td>
+          <td>{{ r.manager }}{% if r.is_self %} <span class="chip chip-you">YOU</span>{% endif %}</td>
+          <td class="num mono">{{ r.total|money }}</td>
+          <td class="num mono gap-cell {{ 'show' if r.is_self or (self_rank and (r.rank - self_rank)|abs <= 2) }}">{% if r.gap_line is not none %}{{ r.gap_line|money_signed }}{% endif %}</td>
+          <td class="num mono dim">{% if r.intv is not none %}{{ r.intv|money_short }}{% endif %}</td>
+          <td class="ladder-cell">
+            <span class="ladder-track">
+              <span class="ladder-zero"></span>
+              {% if r.ladder_pct >= 0 %}
+              <span class="ladder-bar above" style="width: {{ (50 * r.ladder_pct)|round(1) }}%"></span>
+              {% else %}
+              <span class="ladder-bar below" style="width: {{ (-50 * r.ladder_pct)|round(1) }}%"></span>
+              {% endif %}
+              {% if r.gap_line is not none and r.gap_line|abs >= 2e6 %}<span class="ladder-ovf {{ 'r' if r.ladder_pct > 0 else 'l' }}">{{ "→" if r.ladder_pct > 0 else "←" }}</span>{% endif %}
+            </span>
+          </td>
+          <td>{% if r.prize %}<span class="chip chip-payout">${{ "{:,}".format(r.prize) }}</span>{% endif %}</td>
         </tr>
+        {% if r.rank == paid and has_line %}
+        {{ money_line(paid, ("you are " ~ (cushion[0]|money_signed)) if cushion else None, colspan=8) }}
+        {% endif %}
         {% endfor %}
       </tbody>
     </table>
-    {% else %}<p class="empty">No standings snapshot on this board yet.</p>{% endif %}
+    {% else %}<p class="empty">no standings snapshot on this board yet</p>{% endif %}
   </div>
 
-  <div class="card">
-    <div class="card-head"><h2>Remaining events</h2></div>
-    {% if remaining %}
-    <table class="data">
-      <thead><tr><th>Event</th><th class="num">Purse</th><th>Cut</th></tr></thead>
-      <tbody>
-      {% for e in remaining %}
-        <tr>
-          <td><a href="/pick?event={{ e.name|urlencode }}">{{ e.name }}</a></td>
-          <td class="num">{{ e.purse|money }}</td>
-          <td>{{ "no cut" if not e.has_cut else "cut" }}</td>
-        </tr>
-      {% endfor %}
-      </tbody>
-    </table>
-    {% else %}<p class="empty">Ingest predictions to light this up.</p>{% endif %}
-  </div>
+  <aside class="rail">
+    {% if spark %}
+    <div class="card">
+      <div class="card-head"><h3>SEASON POSITION</h3><span class="meta mono">{{ spark.weeks }} wks</span></div>
+      <svg viewBox="0 0 100 110" class="spark" preserveAspectRatio="none">
+        <path d="{{ spark.line_d }}" class="spark-line"/>
+        <path d="{{ spark.self_d }}" class="spark-self"/>
+      </svg>
+      <div class="spark-caption mono">banked {{ spark.end_total|money_short }} <span class="dim">vs line pace</span></div>
+      <svg viewBox="0 0 100 70" class="spark rankpane" preserveAspectRatio="none">
+        <rect x="0" y="{{ spark.band_top }}" width="100" height="{{ spark.band_bot - spark.band_top }}" class="band-top6"/>
+        <path d="{{ spark.rank_d }}" class="spark-self"/>
+      </svg>
+      <div class="spark-caption mono">rank by week — now <b>{{ spark.end_rank }}{{ {1:"st",2:"nd",3:"rd"}.get(spark.end_rank, "th") }}</b> <span class="dim">gold band = paid</span></div>
+    </div>
+    {% endif %}
+
+    {% if seg_rows %}
+    <div class="card">
+      <div class="card-head"><h3>SEGMENT {{ seg_no }} RACE</h3></div>
+      <table class="data mini">
+        <tbody>
+        {% for r in seg_rows %}
+          <tr class="{{ 'self-row' if r.is_self }}">
+            <td class="mono">{{ r.rank }}</td><td>{{ r.manager }}</td>
+            <td class="num mono">{{ r.total|money_short }}</td>
+            <td>{% if r.prize %}<span class="chip chip-payout">${{ r.prize }}</span>{% endif %}</td>
+          </tr>
+          {% if r.rank == 3 %}{{ money_line(3, colspan=4) }}{% endif %}
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% endif %}
+
+    {% if next_event %}
+    <div class="card">
+      <div class="card-head"><h3>NEXT EVENT</h3></div>
+      <div class="next-name">{{ next_event.name|ev_name|upper }}</div>
+      <div class="meta mono">{{ next_event.purse|money_short }} purse · {{ "no cut" if not next_event.has_cut else "cut" }}{% if next_event.picks_per_manager == 2 %} · <span class="chip chip-major">MAJOR ×2</span>{% endif %}</div>
+      <div class="next-pick">
+        {% if my_next_pick %}<span class="chip chip-locked">🔒 {{ my_next_pick }}</span>
+        {% else %}<span class="chip chip-warn">⚠ NOT PICKED</span> <a href="/pick?event={{ next_event.name|ev_name|urlencode }}">open the desk →</a>{% endif %}
+      </div>
+    </div>
+    {% endif %}
+  </aside>
 </section>
 {% endblock %}

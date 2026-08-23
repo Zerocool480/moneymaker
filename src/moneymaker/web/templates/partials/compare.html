@@ -1,0 +1,18 @@
+<div class="cmp-results">
+  {% for r in results %}
+  <div class="cmp-card {{ 'best' if r.p_money == results|map(attribute='p_money')|max }}">
+    <div class="cmp-name">{{ r.name }}</div>
+    <div class="cmp-p mono">P(money) {{ r.p_money|pct }}</div>
+    <div class="cmp-delta mono {{ 'up' if r.p_money - base > 0.0001 else 'flat' }}">
+      {% if results|length > 1 %}{{ "▲" if r.p_money - base > 0.0001 else "" }}{{ ((r.p_money - base) * 100)|round(1) }} pts vs worst{% endif %}
+    </div>
+    <div class="cmp-prize mono dim">E[league $] ${{ r.prize|round(0)|int }}</div>
+    <form hx-post="/api/lock" hx-swap="none"
+          onsubmit="setTimeout(()=>location.reload(), 400)">
+      <input type="hidden" name="event" value="{{ event }}">
+      <input type="hidden" name="key" value="{{ r.key }}">
+      <button class="btn primary" type="submit">LOCK THIS PICK</button>
+    </form>
+  </div>
+  {% endfor %}
+</div>

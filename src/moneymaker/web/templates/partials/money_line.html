@@ -1,0 +1,13 @@
+{% macro money_line(paid, delta_text=None, colspan=None) -%}
+{%- if colspan -%}
+<tr class="money-line-row"><td colspan="{{ colspan }}">
+  <div class="money-line"><span class="money-line-tab">MONEY LINE · TOP {{ paid }} PAID</span>
+  {% if delta_text %}<span class="money-line-delta mono">{{ delta_text }}</span>{% endif %}
+  </div>
+</td></tr>
+{%- else -%}
+<div class="money-line"><span class="money-line-tab">MONEY LINE · TOP {{ paid }} PAID</span>
+{% if delta_text %}<span class="money-line-delta mono">{{ delta_text }}</span>{% endif %}
+</div>
+{%- endif -%}
+{%- endmacro %}

@@ -1,38 +1,42 @@
 {% extends "base.html" %}
 {% block content %}
-<section class="card">
-  <div class="card-head"><h2>Race odds</h2></div>
-  <form hx-post="/race/run" hx-target="#race-result" hx-indicator="#race-spin"
+<section class="event-head">
+  <div>
+    <h1 class="screen-title">RACE OUTLOOK</h1>
+    <div class="meta mono">the projection desk — rival picks sampled from the fitted choice model</div>
+  </div>
+  <form id="race-form" hx-post="/race/run" hx-target="#race-result"
+        hx-indicator="#race-btn" hx-disabled-elt="find button" hx-sync="this:drop"
         class="inline-form">
     <div class="seg-tabs">
       {% for b in boards %}
       <label class="seg-tab {{ 'active' if b == board }}">
-        <input type="radio" name="board" value="{{ b }}" {{ "checked" if b == board }} hidden>
-        {{ b|replace("segment","Seg ")|title }}</label>
+        <input type="radio" name="board" value="{{ b }}" {{ "checked" if b == board }} class="vis-hidden">
+        {{ b|replace("segment","SEG ")|upper }}</label>
       {% endfor %}
     </div>
-    <label class="field">Trials
-      <select name="n">
-        <option value="20000">20k (fast)</option>
-        <option value="60000">60k</option>
-        <option value="150000">150k</option>
-        <option value="300000">300k (max)</option>
-      </select>
-    </label>
-    <label class="field check"><input type="checkbox" name="sensitivity" value="true"> sensitivity band</label>
-    <label class="field check"><input type="checkbox" name="point" value="true"> point picks (no sampling)</label>
-    <button class="btn primary" type="submit">Run simulation</button>
-    <span id="race-spin" class="spinner htmx-indicator">simulating…</span>
+    <button class="btn primary" type="submit" id="race-btn"
+            data-busy="DEALING THE SUNDAYS">RE-RUN</button>
+    <details class="adv">
+      <summary>advanced</summary>
+      <label class="field">trials
+        <select name="n">
+          <option value="20000">20k</option>
+          <option value="60000">60k</option>
+          <option value="150000">150k</option>
+          <option value="300000">300k</option>
+        </select></label>
+      <label class="field check"><input type="checkbox" name="sensitivity" value="true"> sensitivity band</label>
+      <label class="field check"><input type="checkbox" name="point" value="true"> point picks</label>
+    </details>
   </form>
 </section>
-<div id="race-result"></div>
-<script>
-document.querySelectorAll('.seg-tabs label.seg-tab input').forEach(i => {
-  i.closest('label').addEventListener('click', ev => {
-    const tabs = i.closest('.seg-tabs');
-    tabs.querySelectorAll('.seg-tab').forEach(t => t.classList.remove('active'));
-    i.closest('label').classList.add('active');
-  });
-});
-</script>
+<div id="race-result"
+     hx-post="/race/run" hx-trigger="load" hx-include="#race-form"
+     hx-indicator="#race-btn">
+  <section class="card ghost">
+    <div class="ghost-bones"><span></span><span></span><span></span></div>
+    <p class="ghost-cap">dealing 20,000 Sundays — the projection lands here</p>
+  </section>
+</div>
 {% endblock %}

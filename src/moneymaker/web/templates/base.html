@@ -5,6 +5,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Money Maker — {% block title %}{{ page|title }}{% endblock %}</title>
 <link rel="preload" href="/static/inter-var-latin.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="preload" href="/static/barlow-condensed-700.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="preload" href="/static/plex-mono-600.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="stylesheet" href="/static/style.css">
 <script>
 (function () {
@@ -14,38 +16,55 @@
 })();
 </script>
 <script src="/static/htmx.min.js" defer></script>
+<script src="/static/app.js" defer></script>
 </head>
-<body>
+<body hx-boost="true">
 <header class="topbar">
-  <div class="brand">
-    <span class="brand-mark">MM</span>
-    <span class="brand-name">Money Maker Engine</span>
-    <span class="season-chip">{{ season }}</span>
-  </div>
+  <a class="brand" href="/">MONEY MAKER <u>'{{ season % 100 }}</u></a>
   <nav class="nav">
     {% for item, label in [("dashboard","Dashboard"),("pick","Pick"),
-                           ("race","Race Odds"),("season","Season Map"),
-                           ("sunday","Sunday Card"),("history","History")] %}
+                           ("race","Race Outlook"),("season","Season Map"),
+                           ("sunday","Sunday Sweat"),("history","History")] %}
     <a href="/{{ '' if item == 'dashboard' else item }}"
-       class="nav-link {{ 'active' if page == item }}">{{ label }}</a>
+       class="nav-link {{ 'active' if page == item }}"
+       data-key="{{ loop.index }}">{{ label }}</a>
     {% endfor %}
   </nav>
   {% if self_name %}<div class="whoami">{{ self_name }}</div>{% endif %}
-  <button class="theme-toggle" title="Toggle light/dark" onclick="
-    var h = document.documentElement;
-    var light = h.getAttribute('data-theme') === 'light';
-    if (light) { h.removeAttribute('data-theme'); localStorage.setItem('mm-theme','dark'); }
-    else { h.setAttribute('data-theme','light'); localStorage.setItem('mm-theme','light'); }
-  ">◐</button>
+  <button class="theme-toggle" id="theme-toggle" title="theme (t)"
+          aria-pressed="false">◐</button>
 </header>
+{% if ticker %}
+<div class="ticker mono" role="status">
+  <span>OVR <b>{{ ticker.rank }}/{{ ticker.n }}</b></span>
+  {% if ticker.cushion %}
+  <span class="tick-sep">·</span>
+  <span><span class="cushion-dot"></span>{{ ticker.cushion[0]|money_signed }}
+    {{ "above the line" if ticker.cushion[0] >= 0 else "below the line" }}</span>
+  {% endif %}
+  {% if ticker.seg %}
+  <span class="tick-sep">·</span>
+  <span>SEG {{ ticker.seg[0] }}: <b>{{ ticker.seg[1] }}{{ {1:"st",2:"nd",3:"rd"}.get(ticker.seg[1], "th") }}</b></span>
+  {% endif %}
+  {% if ticker.next_event %}
+  <span class="tick-sep">·</span><span>{{ ticker.next_event|upper }} next</span>
+  {% endif %}
+  <span class="tick-sep">·</span>
+  {% if ticker.p_money is not none %}
+  <span>P(money) <b>{{ ticker.p_money|pct0 }}</b> ±{{ (100 * ticker.p_money_w)|round(1) }}</span>
+  {% else %}
+  <span title="run a projection on Race Outlook">P(money) —</span>
+  {% endif %}
+</div>
+{% endif %}
 <main class="content">
 {% if not onboarded %}
   <section class="onboard card">
-    <h2>Welcome to the Money Maker Engine</h2>
-    <p>No league data yet for {{ season }}. From a terminal:</p>
+    <h2>MONEY MAKER ENGINE</h2>
+    <p>No league data for {{ season }} yet. From a terminal:</p>
     <pre>mm ingest-league data/league/latest.xlsx --self "Jay Doura" --season {{ season }}
-mm ingest-preds data/datagolf/EVENT.csv --event "sony"   # or: mm fetch-preds</pre>
-    <p>Then refresh this page.</p>
+mm ingest-preds data/datagolf/EVENT.csv --event "sony"</pre>
+    <p class="meta">then refresh — the broadcast opens here.</p>
   </section>
 {% else %}
   {% block content %}{% endblock %}

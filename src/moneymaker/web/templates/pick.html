@@ -1,77 +1,58 @@
 {% extends "base.html" %}
 {% block content %}
-{% if not pred_events %}
-  <p class="empty">No events with predictions yet — <code>mm ingest-preds</code> or <code>mm fetch-preds</code> first.</p>
+{% if not event_row %}
+  <section class="card ghost">
+    <div class="ghost-bones"><span></span><span></span><span></span></div>
+    <p class="ghost-cap">ingest predictions — the decision desk lands here</p>
+  </section>
 {% else %}
-<section class="card">
-  <div class="card-head">
-    <h2>Best available{% if event_row %} — {{ event_row.name }}{% endif %}</h2>
-    <form method="get" action="/pick" class="inline-form">
-      <select name="event" onchange="this.form.submit()">
-        {% for e in pred_events %}
-        <option value="{{ e.name }}" {{ "selected" if event_row and e.event_id == event_row.event_id }}>{{ e.name }}</option>
-        {% endfor %}
-      </select>
-      <div class="seg-tabs">
-        {% for p in ["neutral", "leading", "trailing"] %}
-        <button class="seg-tab {{ 'active' if posture == p }}" name="posture" value="{{ p }}">{{ p|title }}</button>
-        {% endfor %}
-      </div>
-    </form>
+<section class="event-head">
+  <div>
+    <h1 class="screen-title">{{ event_row.name|ev_name|upper }}</h1>
+    <div class="meta mono">{{ purse|money }} · {{ "no cut" if not event_row.has_cut else "cut event" }} · {{ field_n }} players · preds {{ pulled_at }}</div>
   </div>
-  {% if event_row %}
-  <p class="meta">Purse {{ purse|money }} · {{ "no cut" if not event_row.has_cut else "cut event" }} ·
-     preds {{ pulled_at }} · {{ used_count }} used · {{ inel_count }} ineligible</p>
-  <div class="cols">
-    <table class="data grow board-table">
-      <thead><tr><th>#</th><th>Golfer</th><th class="num">Win</th><th class="num">Top 5</th>
-        <th class="num">Cut</th><th class="num">EV</th><th class="num">Floor</th>
-        <th class="num">Score</th><th>Flags</th></tr></thead>
-      <tbody>
-      {% for r in board_rows %}
-        <tr class="clickable {{ 'flagged' if r.flags }}"
-            hx-get="/pick/why?event={{ event_row.name|urlencode }}&key={{ r.key|urlencode }}"
-            hx-target="#why-panel" hx-swap="innerHTML">
-          <td>{{ loop.index }}</td>
-          <td>{{ r.display_name }}</td>
-          <td class="num">{{ r.win|pct }}</td>
-          <td class="num">{{ r.top_5|pct }}</td>
-          <td class="num">{{ r.make_cut|pct0 }}</td>
-          <td class="num">{{ r.exp|money }}</td>
-          <td class="num">{{ r.floor|money }}</td>
-          <td class="num strong">{{ r.score|money }}</td>
-          <td>{% if r.flags %}<span class="chip chip-flag">{{ r.flags }}</span>{% endif %}</td>
-        </tr>
+  <div class="trap-ritual mono">
+    <span class="chip {{ 'chip-ok' if n_amateurs == 0 else 'chip-warn' }}">{{ "no amateurs in field" if n_amateurs == 0 else n_amateurs ~ " amateur" ~ ("s" if n_amateurs > 1) ~ " flagged $0" }}</span>
+    <span class="chip chip-ok">{{ inel_count }} ineligible filtered</span>
+    {% if my_locked %}<span class="chip chip-locked">🔒 locked ({{ my_locked|length }}/{{ event_row.picks_per_manager }})</span>{% endif %}
+  </div>
+  <form method="get" action="/pick" class="inline-form"
+        hx-get="/pick" hx-target="#board-wrap" hx-select="#board" hx-push-url="true">
+    <select name="event" onchange="this.form.requestSubmit ? this.form.requestSubmit() : this.form.submit()">
+      {% for e in pred_events %}
+      <option value="{{ e.name|ev_name }}" {{ "selected" if e.event_id == event_row.event_id }}>{{ e.name|ev_name }}</option>
       {% endfor %}
-      </tbody>
-    </table>
-    <aside class="side-panel">
-      <div id="why-panel" class="card">
-        <p class="empty">Click a golfer for the why-panel: bucket-by-bucket EV.</p>
-      </div>
-      <div class="card">
-        <div class="card-head"><h3>Rival reads</h3></div>
-        {% if rivals %}
-        <table class="data">
-          <tbody>
-          {% for r in rivals %}
-            <tr>
-              <td>{{ r.manager }}</td>
-              <td>
-                {% for name, p in r.picks %}
-                  <span class="chip {{ 'chip-locked' if r.locked }}">{{ name }}{% if p is not none %} {{ p|pct0 }}{% endif %}</span>
-                {% endfor %}
-                {% if r.locked %}<span class="meta">locked</span>{% endif %}
-              </td>
-            </tr>
-          {% endfor %}
-          </tbody>
-        </table>
-        {% else %}<p class="empty">No rival projections available.</p>{% endif %}
-      </div>
-    </aside>
-  </div>
-  {% endif %}
+    </select>
+    <div class="seg-tabs" role="radiogroup" aria-label="posture">
+      {% for p in ["neutral", "leading", "trailing"] %}
+      <button class="seg-tab {{ 'active' if posture == p }}" name="posture" value="{{ p }}">{{ p|upper }}</button>
+      {% endfor %}
+    </div>
+  </form>
 </section>
+
+<section class="cols">
+  <div class="grow" id="board-wrap">
+    {% include "partials/board.html" %}
+  </div>
+  <aside class="side-panel">
+    <div id="why-panel" class="card ghost">
+      <div class="ghost-bones"><span></span><span></span><span></span></div>
+      <p class="ghost-cap">pick a golfer — the payout ladder lands here</p>
+    </div>
+  </aside>
+</section>
+
+<div class="compare-tray mono" id="compare-tray" hidden>
+  <form id="compare-form" hx-post="/pick/compare" hx-target="#compare-out"
+        hx-indicator="#cmp-spin">
+    <input type="hidden" name="event" value="{{ event_row.name|ev_name }}">
+    <input type="hidden" name="keys" id="cmp-keys" value="">
+    <span id="cmp-count" class="cmp-label"></span>
+    <button class="btn primary" type="submit">RUN THE COMPARISON</button>
+    <span id="cmp-spin" class="spinner">conditioning the race</span>
+  </form>
+  <div id="compare-out"></div>
+</div>
 {% endif %}
 {% endblock %}

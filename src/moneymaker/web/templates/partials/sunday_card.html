@@ -1,40 +1,107 @@
-<section class="card">
-  <div class="card-head"><h3>{{ event }} — you hold: {{ mine|join(", ") if mine else "no pick" }}</h3></div>
-  <p class="meta">{{ n_players }} players still standing.</p>
-  {% for m, name in amateurs %}
-  <p class="callout critical">{{ m }} holds AMATEUR {{ name }} — $0 whatever he shoots.</p>
+{% from "partials/money_line.html" import money_line %}
+<section class="sweat-hero">
+  <div class="sweat-statement">RIGHT NOW YOU FINISH
+    <span class="sweat-rank">{{ now_rank }}{{ {1:"ST",2:"ND",3:"RD"}.get(now_rank, "TH") }}</span>
+    {% if now_prize %}<span class="chip chip-payout">${{ "{:,}".format(now_prize) }}</span>{% endif %}
+  </div>
+  <div class="sweat-numbers mono">
+    <span class="sweat-p">P(money) <b>{{ p_money|pct }}</b> <span class="whisker">±{{ (100 * p_money_w)|round(1) }}</span></span>
+    <span>E[finish] {{ exp_rank|round(1) }}</span>
+    <span>E[league $] ${{ e_prize|round(0)|int }}</span>
+    {% if asof %}<span class="dim">positions as of {{ asof }}</span>{% endif %}
+  </div>
+</section>
+
+{% if round_warn %}
+<p class="callout mono">⚠ {{ round_warn }}</p>
+{% endif %}
+{% for m, name in amateurs %}
+<p class="callout critical mono">⚠ {{ m }} holds AMATEUR {{ name }} — $0 whatever he shoots</p>
+{% endfor %}
+
+<section class="holdings">
+  {% for h in holdings %}
+  <div class="hold-card">
+    <div class="hold-name">{{ h.name|upper }}</div>
+    <div class="mono">{% if h.to_par is not none %}{{ h.to_par if h.to_par < 0 else "+" ~ h.to_par }} today{% else %}<span class="dim">not in field</span>{% endif %}
+      · projecting ≈ {{ h.proj|money_short }}</div>
+  </div>
   {% endfor %}
-  <div class="cols">
-    <div class="card">
-      <div class="card-head"><h4>Board finish tonight</h4></div>
-      <div class="barlist" role="img" aria-label="Finish position probabilities">
-        {% for d in dist %}
-        <div class="barlist-row" title="Finish {{ d.k }}: {{ d.p|pct }}">
-          <span class="barlist-label">{{ d.k }}{{ {1:"st",2:"nd",3:"rd"}.get(d.k, "th") }}</span>
-          <span class="barlist-track"><span class="barlist-fill" style="width: {{ (100 * d.p / maxp)|round(1) }}%"></span></span>
-          <span class="barlist-value">{{ d.p|pct }}</span>
-        </div>
-        {% endfor %}
+</section>
+
+{% if sweat %}
+<section class="card">
+  <div class="card-head"><h3>THE SWEAT STRIP — {{ sweat.golfer|upper }} TONIGHT</h3></div>
+  <div class="chart-scroll">
+  <svg viewBox="0 0 1100 220" class="sweat-chart" preserveAspectRatio="xMidYMid meet" id="sweat-svg">
+    {% set n_cols = sweat.cols|length %}
+    {% set cw = (1060 / n_cols)|round(1) %}
+    {% set band_total = sweat.band_lo == 1 and sweat.band_hi == n_cols %}
+    {% if sweat.band_lo and not band_total %}
+    <rect x="{{ 20 + (sweat.band_lo - 1) * cw }}" y="8"
+          width="{{ (sweat.band_hi - sweat.band_lo + 1) * cw }}" height="172"
+          class="zone-paid-svg zone-strong"/>
+    {% endif %}
+    {% for c in sweat.cols %}
+    {% set h = (150 * c.p / sweat.maxp)|round(1) %}
+    <rect x="{{ 22 + (c.f - 1) * cw }}" y="{{ 180 - h }}" width="{{ cw - 3 }}" height="{{ h }}"
+          rx="2" class="dist-col col" data-finish="{{ c.f }}">
+      <title>finish {{ c.f }} — {{ c.p|pct }}</title>
+    </rect>
+    {% if c.f is divisibleby 5 or c.f == 1 %}
+    <text x="{{ 22 + (c.f - 1) * cw + (cw - 3) / 2 }}" y="196" class="svg-label" text-anchor="middle">{{ c.f }}</text>
+    {% endif %}
+    {% endfor %}
+    {% for mk in sweat.markers %}
+    <g class="pass-marker" data-finish="{{ mk.f }}" data-rival="{{ mk.rival }}"
+       data-pays="{{ mk.pays|money_short }}" data-p="{{ mk.p|pct }}">
+      <line x1="{{ 20 + mk.f * cw }}" x2="{{ 20 + mk.f * cw }}" y1="4" y2="184" class="marker-line"/>
+      <rect x="{{ 14 + mk.f * cw }}" y="0" width="12" height="200" class="hit"/>
+      <text x="{{ 20 + mk.f * cw }}" y="{{ 14 + loop.index0 * 13 }}" class="svg-flag" text-anchor="start"> {{ mk.rival.split(" ")[0]|upper }} · {{ mk.f }}</text>
+    </g>
+    {% endfor %}
+  </svg>
+  </div>
+  <div class="tooltip mono" id="sweat-tip" hidden></div>
+  {{ money_line(paid, sweat.golfer.split(" ")[-1]|upper ~ " can't lose it alone tonight — the sweat is on the DEFENSE board" if band_total
+                else "gold band = finishes that keep you in the money") }}
+</section>
+{% endif %}
+
+<section class="cols">
+  <div class="card grow">
+    <div class="card-head"><h3>ATTACK — rivals ahead</h3></div>
+    {% for a in attack %}
+    <div class="rival-card">
+      <div class="rival-line">
+        <span class="rival-verdict">PASS {{ a.manager.split(" ")[0]|upper }} — needs {{ a.needs }}{% if a.pays %} ({{ a.pays|money_short }}){% endif %}</span>
+        <span class="rival-p mono">{{ a.p|pct }}</span>
       </div>
+      <div class="meter"><span class="meter-fill" style="width: {{ (100 * a.p)|round(1) }}%"></span></div>
+      <div class="meta mono">gap {{ a.gap|money }} · they hold
+        {% for g, tp in a.golfers %}{{ g }}{% if tp is not none %} ({{ tp if tp < 0 else "+" ~ tp }}){% endif %}{{ ", " if not loop.last }}{% endfor %}</div>
     </div>
-    <div class="card grow">
-      <div class="card-head"><h4>Pass thresholds — rivals ahead of you</h4></div>
-      {% if thresholds %}
-      <table class="data">
-        <thead><tr><th>Manager</th><th class="num">Gap</th><th>Needs</th><th class="num">Pays</th><th class="num">P(you pass)</th></tr></thead>
-        <tbody>
-        {% for t in thresholds %}
-          <tr>
-            <td>{{ t.manager }}</td>
-            <td class="num">{{ t.gap|money }}</td>
-            <td>{{ t.needs }}</td>
-            <td class="num">{{ t.pays|money if t.pays else "—" }}</td>
-            <td class="num strong">{{ t.p_pass|pct }}</td>
-          </tr>
-        {% endfor %}
-        </tbody>
-      </table>
-      {% else %}<p class="empty">Nobody ahead of you. Protect the lead.</p>{% endif %}
+    {% else %}
+    <p class="empty">nobody ahead — you lead the board</p>
+    {% endfor %}
+    {% if n_out %}<p class="meta">out of reach tonight: {{ out_names }}{% if n_out > 3 %} +{{ n_out - 3 }} more{% endif %}</p>{% endif %}
+  </div>
+
+  <div class="card grow">
+    <div class="card-head"><h3>DEFENSE — rivals behind</h3></div>
+    {% for d in defense %}
+    <div class="rival-card {{ 'edge-gold' if d.knocks_out }}">
+      <div class="rival-line">
+        <span class="rival-verdict">{{ d.manager.split(" ")[0]|upper }} needs {{ d.needs }}
+          {% if d.alarm %}<span class="chip chip-flag">⚠ LIVE THREAT</span>{% endif %}</span>
+        <span class="rival-p mono">{{ d.p|pct }}</span>
+      </div>
+      <div class="meter"><span class="meter-fill neutral" style="width: {{ (100 * d.p)|round(1) }}%"></span></div>
+      <div class="meta mono">their cushion {{ (0 - d.gap)|money_signed }} · they hold
+        {% for g, tp in d.golfers %}{{ g }}{% if tp is not none %} ({{ tp if tp < 0 else "+" ~ tp }}){% endif %}{{ ", " if not loop.last }}{% endfor %}</div>
     </div>
+    {% else %}
+    <p class="empty">nobody behind can reach you tonight</p>
+    {% endfor %}
   </div>
 </section>

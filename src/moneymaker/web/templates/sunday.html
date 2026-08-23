@@ -1,22 +1,34 @@
 {% extends "base.html" %}
 {% block content %}
-<section class="card">
-  <div class="card-head"><h2>Sunday card</h2></div>
-  <p class="meta">Final-round strokes simulator: live 54-hole positions + your league's locked picks
-     → finish odds and dollar pass-thresholds.</p>
-  <form hx-post="/sunday/run" hx-target="#sunday-result" hx-indicator="#sun-spin"
-        hx-encoding="multipart/form-data" class="inline-form">
-    <label class="field">Event
-      <select name="event">
-        {% for e in pred_events %}<option value="{{ e.name }}">{{ e.name }}</option>{% endfor %}
-      </select>
-    </label>
-    <label class="field check"><input type="radio" name="source" value="live" checked> live DataGolf positions</label>
-    <label class="field check"><input type="radio" name="source" value="upload"> upload CSV</label>
-    <input type="file" name="positions" accept=".csv">
-    <button class="btn primary" type="submit">Deal the card</button>
-    <span id="sun-spin" class="spinner htmx-indicator">simulating…</span>
+<section class="event-head">
+  <div>
+    <h1 class="screen-title">SUNDAY SWEAT</h1>
+    <div class="meta mono">live positions · pass thresholds · the card deals itself</div>
+  </div>
+  <form id="sunday-form" hx-post="/sunday/run" hx-target="#sunday-result"
+        hx-encoding="multipart/form-data" hx-indicator="#sun-btn"
+        hx-disabled-elt="find button" class="inline-form">
+    <select name="event">
+      {% for e in pred_events %}
+      <option value="{{ e.name|ev_name }}" {{ "selected" if default_event == e.name }}>{{ e.name|ev_name }}</option>
+      {% endfor %}
+    </select>
+    <button class="btn primary" type="submit" id="sun-btn"
+            data-busy="DEALING THE CARD">DEAL THE CARD</button>
+    <details class="adv">
+      <summary>source</summary>
+      <label class="field check"><input type="radio" name="source" value="live" checked> live DataGolf</label>
+      <label class="field check"><input type="radio" name="source" value="upload" id="src-upload"> upload CSV</label>
+      <input type="file" name="positions" accept=".csv" class="file-hidden" id="pos-file">
+      <label class="field">trials <select name="n"><option value="50000">50k</option><option value="150000">150k</option></select></label>
+    </details>
   </form>
 </section>
-<div id="sunday-result"></div>
+<div id="sunday-result" class="sunday-scale"
+     {% if default_event %}hx-post="/sunday/run" hx-trigger="load" hx-include="#sunday-form" hx-indicator="#sun-btn"{% endif %}>
+  <section class="card ghost">
+    <div class="ghost-bones"><span></span><span></span><span></span></div>
+    <p class="ghost-cap">deal the card — finish odds and pass thresholds land here</p>
+  </section>
+</div>
 {% endblock %}

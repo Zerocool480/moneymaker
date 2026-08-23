@@ -1,56 +1,85 @@
 {% extends "base.html" %}
 {% block content %}
+<section class="event-head">
+  <div>
+    <h1 class="screen-title">THE SEASON FILM</h1>
+    <div class="meta mono">banked {{ my_total|money }} across {{ my_picks|length }} settled picks</div>
+  </div>
+</section>
+
+{% if chart %}
+<section class="card">
+  <div class="card-head"><h3>THE MONEY RACE</h3>
+    <span class="meta mono">you vs the line vs 1st · {{ chart.weeks }} weeks</span></div>
+  <div class="chart-scroll">
+  <svg viewBox="0 0 1240 320" class="race-chart" preserveAspectRatio="xMidYMid meet">
+    <path d="{{ chart.first_d }}" class="race-first"/>
+    <path d="{{ chart.line_d }}" class="race-line"/>
+    <path d="{{ chart.self_d }}" class="race-self"/>
+    {% if chart.cross_x %}
+    <line x1="{{ chart.cross_x }}" x2="{{ chart.cross_x }}" y1="20" y2="300" class="svg-goldline"/>
+    <text x="{{ chart.cross_x + 6 }}" y="34" class="svg-annot">crossed the line</text>
+    {% endif %}
+    <text x="1188" y="{{ chart.y_self }}" class="svg-value self-ink">YOU {{ chart.end_self|money_short }}</text>
+    <text x="1188" y="{{ chart.y_line + 14 }}" class="svg-flag">LINE {{ chart.end_line|money_short }}</text>
+    <text x="1188" y="{{ chart.y_first - 8 }}" class="svg-label">1ST {{ chart.end_first|money_short }}</text>
+  </svg>
+  </div>
+</section>
+{% endif %}
+
 <section class="cols">
   <div class="card grow">
-    <div class="card-head"><h2>Your season — {{ my_total|money }} banked</h2></div>
+    <div class="card-head"><h3>YOUR LEDGER</h3></div>
     {% if my_picks %}
     <table class="data">
       <thead><tr><th>Event</th><th>Pick</th><th class="num">Earned</th></tr></thead>
       <tbody>
       {% for p in my_picks %}
-        <tr><td>{{ p.event }}</td><td>{{ p.display_name }}</td>
-            <td class="num">{{ p.earnings|money if p.earnings is not none else "pending" }}</td></tr>
+        <tr><td>{{ p.event|ev_name }}</td><td>{{ p.display_name }}</td>
+            <td class="num mono {{ 'dim' if p.earnings == 0 }}">{{ p.earnings|money }}</td></tr>
       {% endfor %}
       </tbody>
+      <tfoot><tr><td colspan="2">Season total</td><td class="num mono strong">{{ my_total|money }}</td></tr></tfoot>
     </table>
-    {% else %}<p class="empty">No picks recorded yet.</p>{% endif %}
+    {% else %}<p class="empty">no settled picks yet</p>{% endif %}
   </div>
 
   <div class="card grow">
-    <div class="card-head"><h2>Rival profiles</h2></div>
+    <div class="card-head"><h3>RIVAL PROFILES</h3><span class="meta">the 12 nearest your rank</span></div>
     {% if profiles %}
-    <table class="data">
-      <thead><tr><th>Manager</th><th class="num">Chalk</th><th class="num">Form</th>
-        <th class="num">Mirror</th><th class="num">Hoard</th><th>Dead hoard</th></tr></thead>
+    <table class="data profiles">
+      <thead><tr><th>Manager</th><th>Chalk</th><th>Chase</th><th>Mirror</th><th>Hoard</th><th></th></tr></thead>
       <tbody>
       {% for p in profiles %}
         <tr>
-          <td>{{ p.manager }}</td>
-          <td class="num">{{ p.chalk_rate|pct0 }}</td>
-          <td class="num">{{ p.form_chase_rate|pct0 }}</td>
-          <td class="num">{{ p.mirror_rate|pct0 }}</td>
-          <td class="num">{{ p.hoard_score|pct0 }}</td>
-          <td>{% if p.dead_hoard %}<span class="chip chip-flag">{{ p.dead_hoard|join(", ") }}</span>{% endif %}</td>
+          <td>{% if p.rank %}<span class="mono dim">{{ p.rank }}</span> {% endif %}{{ p.manager }}</td>
+          {% for v in [p.chalk_rate, p.form_chase_rate, p.mirror_rate, p.hoard_score] %}
+          <td class="dotstrip-cell">
+            <span class="dotstrip"><span class="dot" style="left: {{ (100 * v)|round(0) }}%"></span></span>
+            <span class="mono dim">{{ v|pct0 }}</span>
+          </td>
+          {% endfor %}
+          <td>{% if p.dead_hoard %}<span class="chip" title="{{ p.dead_hoard|join(', ') }}">dead: {{ p.dead_hoard|length }}</span>{% endif %}</td>
         </tr>
       {% endfor %}
       </tbody>
     </table>
-    {% else %}<p class="empty">Profiles appear once pick history exists.</p>{% endif %}
+    {% else %}<p class="empty">profiles appear once pick history exists</p>{% endif %}
   </div>
 </section>
 
 <section class="card">
-  <div class="card-head"><h2>Journal</h2></div>
+  <div class="card-head"><h3>JOURNAL</h3></div>
   {% if journal %}
   <table class="data">
-    <thead><tr><th>When</th><th>Kind</th><th>Event</th><th>Note</th></tr></thead>
     <tbody>
     {% for j in journal %}
-      <tr><td class="meta">{{ j.entry_at }}</td><td>{{ j.kind }}</td>
-          <td>{{ j.event or "—" }}</td><td>{{ j.body }}</td></tr>
+      <tr><td class="meta mono">{{ j.entry_at[:16] }}</td><td>{{ j.kind }}</td>
+          <td>{{ (j.event or "")|ev_name }}</td><td>{{ j.body }}</td></tr>
     {% endfor %}
     </tbody>
   </table>
-  {% else %}<p class="empty">Journal is empty — <code>mm journal --add "..."</code>.</p>{% endif %}
+  {% else %}<p class="empty">journal empty — <code>mm journal --add "..."</code></p>{% endif %}
 </section>
 {% endblock %}

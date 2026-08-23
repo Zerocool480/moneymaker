@@ -1,48 +1,83 @@
 {% extends "base.html" %}
 {% block content %}
+<section class="event-head">
+  <div>
+    <h1 class="screen-title">SEASON MAP</h1>
+    <div class="meta mono">every event · every pick · the whole campaign on one card</div>
+  </div>
+</section>
+
+{% if hoard %}
 <section class="card">
-  <div class="card-head"><h2>Season map</h2></div>
-  <table class="data">
-    <thead><tr><th>#</th><th>Event</th><th>Seg</th><th class="num">Purse</th>
-      <th>Field</th><th>Status</th><th>Your pick</th><th class="num">Earned</th></tr></thead>
+  <div class="card-head"><h3>THE HOARD — best names still unused</h3></div>
+  <div class="hoard-strip">
+    {% for h in hoard %}<span class="chip">{{ h }}</span>{% endfor %}
+  </div>
+</section>
+{% endif %}
+
+<section class="card">
+  <table class="data season-table">
+    <thead><tr><th>#</th><th>Event</th><th class="num">Purse</th>
+      <th>Field</th><th></th><th>Your pick</th><th class="num">Earned</th><th></th></tr></thead>
     <tbody>
     {% set ns = namespace(seg=None) %}
     {% for e in schedule %}
-      {% if e.segment != ns.seg %}{% set ns.seg = e.segment %}
-      <tr class="seg-head"><td colspan="8">Segment {{ e.segment }}</td></tr>
+      {% if e.segment != ns.seg %}
+        {% if ns.seg is not none and segs.get(ns.seg) %}
+        {% set s = segs[ns.seg] %}
+        <tr class="trophy-row"><td colspan="8">
+          SEGMENT {{ ns.seg }} — {{ s.total|money }}
+          {% if s.rank %} · finished {{ s.rank }}{{ {1:"st",2:"nd",3:"rd"}.get(s.rank, "th") }}{% endif %}
+          {% if s.paid %} <span class="chip chip-payout">paid ${{ s.paid }}</span>{% endif %}
+        </td></tr>
+        {% endif %}
+        {% set ns.seg = e.segment %}
+        <tr class="seg-head"><td colspan="8">SEGMENT {{ e.segment }}</td></tr>
       {% endif %}
       <tr class="status-{{ e.status }}">
-        <td>{{ e.seq + 1 }}</td>
-        <td>{{ e.name }}{% if e.picks_per_manager == 2 %} <span class="chip chip-major">major ×2</span>{% endif %}</td>
-        <td>{{ e.segment }}</td>
-        <td class="num">{{ e.purse|money }}</td>
-        <td>{{ "strong" if e.strong else "open" }}</td>
-        <td><span class="chip chip-{{ e.status }}">{{ e.status }}</span></td>
+        <td class="mono">{{ e.seq + 1 }}</td>
+        <td>{{ e.name|ev_name }}{% if e.picks_per_manager == 2 %} <span class="chip chip-major">MAJOR ×2</span>{% endif %}</td>
+        <td class="num mono">{{ e.purse|money_short }}</td>
+        <td class="dim">{{ "strong" if e.strong else "open" }}</td>
+        <td>{% if e.status == "locked" %}<span class="chip chip-locked">🔒</span>
+            {% elif e.status == "next" %}<span class="chip chip-next">NEXT UP</span>{% endif %}</td>
         <td>{{ e.pick or "—" }}</td>
-        <td class="num">{{ e.earned|money if e.earned is not none else "—" }}</td>
+        <td class="num mono earn-cell">
+          {% if e.earned is not none %}
+          <span class="earn-bar" style="width: {{ (64 * e.earn_pct)|round(1) }}px"></span>
+          <span class="{{ 'dim' if e.earned == 0 }}">{{ e.earned|money }}</span>
+          {% else %}—{% endif %}
+        </td>
+        <td></td>
       </tr>
     {% endfor %}
+    {% if ns.seg is not none and segs.get(ns.seg) %}
+    {% set s = segs[ns.seg] %}
+    <tr class="trophy-row"><td colspan="8">
+      SEGMENT {{ ns.seg }} — {{ s.total|money }}
+      {% if s.rank %} · {{ "finished" if s.done else "running" }} {{ s.rank }}{{ {1:"st",2:"nd",3:"rd"}.get(s.rank, "th") }}{% endif %}
+      {% if s.paid %} <span class="chip chip-payout">paid ${{ s.paid }}</span>{% endif %}
+    </td></tr>
+    {% endif %}
     </tbody>
   </table>
 </section>
 
 <section class="card">
-  <div class="card-head"><h2>Plan the rest of the season</h2></div>
-  <form hx-post="/season/plan" hx-target="#plan-result" hx-indicator="#plan-spin"
-        class="inline-form">
-    <label class="field">Posture
+  <div class="card-head"><h2>PLAN THE REST</h2></div>
+  <form hx-post="/season/plan" hx-target="#plan-result" hx-indicator="#plan-btn"
+        hx-disabled-elt="find button" class="inline-form">
+    <label class="field">posture
       <select name="posture">
-        <option value="neutral">Neutral</option>
-        <option value="leading">Leading (protect)</option>
-        <option value="trailing">Trailing (chase)</option>
+        <option value="neutral">neutral</option>
+        <option value="leading">leading — protect</option>
+        <option value="trailing">trailing — chase</option>
       </select>
     </label>
-    <label class="field">Reserve (comma-separated)
-      <input type="text" name="reserve" placeholder="Scheffler, Scottie">
-    </label>
-    <label class="field">Top-k <input type="number" name="top_k" value="8" min="3" max="15"></label>
-    <button class="btn primary" type="submit">Solve assignment</button>
-    <span id="plan-spin" class="spinner htmx-indicator">solving…</span>
+    <label class="field">reserve <input type="text" name="reserve" placeholder="Scheffler, Scottie"></label>
+    <label class="field">top-k <input type="number" name="top_k" value="8" min="3" max="15"></label>
+    <button class="btn primary" type="submit" id="plan-btn" data-busy="SOLVING">SOLVE THE ASSIGNMENT</button>
   </form>
   <div id="plan-result"></div>
 </section>
